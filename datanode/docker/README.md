@@ -98,10 +98,7 @@ synchronizes with a network of other InterUSS Platform data nodes:
 export ZOO_MY_ID=[your InterUSS Platform network Zookeeper ID]
 export ZOO_SERVERS=[InterUSS Platform server network; ex: server.1=0.0.0.0:2888:3888 server.2=zoo2:2888:3888 server.3=zoo3:2888:3888, make sure your server is 0.0.0.0]
 export INTERUSS_PUBLIC_KEY=[paste public key here]
-
-docker run --name="datanode-zookeeper" --restart always -p 2888:2888 -p 3888:3888 --expose 2181 -e ZOO_MY_ID="${ZOO_MY_ID}" -e ZOO_SERVERS="${ZOO_SERVERS}" -d zookeeper
-
-docker run --name="datanode-storage_api" --link="tcl4-zookeeper" --restart always --expose 5000 -e INTERUSS_API_PORT=5000 -e INTERUSS_PUBLIC_KEY="${INTERUSS_PUBLIC_KEY}" -e INTERUSS_CONNECTIONSTRING="datanode-zookeeper:2181" -e INTERUSS_VERBOSE=true -d interussplatform/storage_api:tcl4
-
-docker run --name="datanode-reverse_proxy" --link="tcl4-storage_api" --restart always -p 8120:8120 -p 8121:8121 -e INTERUSS_API_PORT_HTTP=${INTERUSS_API_PORT_HTTP:-8120} -e INTERUSS_API_PORT_HTTPS=${INTERUSS_API_PORT_HTTPS:-8121} -e STORAGE_API_SERVER="datanode-storage_api" -e STORAGE_API_PORT=5000 -d interussplatform/reverse_proxy
+export SSL_CERT_PATH=[/path/containing/cert.pem/in/it]
+export SSL_KEY_PATH=[/path/containing/key.pem/in/it]
+docker docker-compose -f docker-compose.yaml -f docker-compose_localssl.yaml -p datanode up
 ```
