@@ -44,8 +44,6 @@ from flask import abort
 from flask import Flask
 from flask import jsonify
 from flask import request
-# pyJWT is for decrypting JWT tokens
-import jwt
 # rest_framework is for HTTP status codes
 from rest_framework import status
 
@@ -103,6 +101,7 @@ log = logging.getLogger('InterUSS_DataNode_StorageAPI')
 log.setLevel(logging.DEBUG)
 wrapper = None  # Global object API uses for access
 webapp = Flask(__name__)  # Global object serving the API
+auth = None  # Global object providing authorization
 
 
 ######################################################################
@@ -123,7 +122,7 @@ def Status():
 def Introspect():
   #  status checker of FIMS authorization token (access_token)
   log.debug('Status handler instantiated...')
-  uss_id = authorization.ValidateAccessToken()
+  uss_id = auth.ValidateAccessToken()
   return _FormatResult({
       'status': 'success',
       'message': 'ACCESS TOKEN VALID',
@@ -147,7 +146,7 @@ def IntrospectTile(zoom, x, y):
     tiles = ((int(x), int(y)), )
   except ValueError as e:
     abort(status.HTTP_400_BAD_REQUEST, e.message)
-  uss_id = authorization.ValidateAccessToken(zoom, tiles)
+  uss_id = auth.ValidateAccessToken(authorization.JoinZoom(zoom, tiles))
   return _FormatResult({
     'status': 'success',
     'message': 'ACCESS TOKEN VALID',
@@ -172,7 +171,7 @@ def IntrospectTiles(zoom):
     tiles = _ConvertRequestToTiles(zoom)
   except (ValueError, TypeError, OverflowError) as e:
     abort(status.HTTP_400_BAD_REQUEST, e.message)
-  uss_id = authorization.ValidateAccessToken(zoom, tiles)
+  uss_id = auth.ValidateAccessToken(authorization.JoinZoom(zoom, tiles))
   return _FormatResult({
     'status': 'success',
     'message': 'ACCESS TOKEN VALID',
@@ -241,7 +240,7 @@ def GridCellOperatorHandler(zoom, x, y):
   except ValueError:
     abort(status.HTTP_400_BAD_REQUEST,
           'Invalid parameters for slippy tile coordinates, must be integers.')
-  uss_id = authorization.ValidateAccessToken(zoom, ((x, y),))
+  uss_id = auth.ValidateAccessToken(((zoom, x, y),))
   if request.method == 'GET':
     result = _GetGridCellOperator(zoom, x, y)
   elif request.method in ('PUT', 'POST'):
@@ -319,7 +318,7 @@ def GridCellsOperatorDataHandler(zoom):
     abort(status.HTTP_400_BAD_REQUEST, e.message)
   except OverflowError as e:
     abort(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, e.message)
-  uss_id = authorization.ValidateAccessToken(zoom, tiles)
+  uss_id = auth.ValidateAccessToken(authorization.JoinZoom(zoom, tiles))
   if request.method == 'GET':
     result = _GetGridCellsOperator(zoom, tiles)
   elif request.method in ('PUT', 'POST'):
@@ -961,7 +960,7 @@ def ParseOptions(argv):
       '-p',
       '--port',
       dest='port',
-      default=os.getenv('INTERUSS_API_PORT', '5000'),
+      default=int(os.getenv('INTERUSS_API_PORT', '5000')),
       help='Specific port to use on this machine for the web services '
       '[or env variable INTERUSS_API_PORT]',
       metavar='PORT')
@@ -970,22 +969,38 @@ def ParseOptions(argv):
       '--verbose',
       action='store_true',
       dest='verbose',
-      default=False,
+      default=(os.environ.get('INTERUSS_VERBOSE', 'false').lower() == 'true'),
       help='Verbose (DEBUG) logging [or env variable INTERUSS_VERBOSE]')
   parser.add_option(
       '-t',
       '--testid',
       dest='testid',
-      default=False,
+      default=os.environ.get('INTERUSS_TESTID'),
       help='Force testing mode with test data located in specific test id  '
       '[or env variable INTERUSS_TESTID]',
       metavar='TESTID')
+  parser.add_option(
+      '-k',
+      '--public_key',
+      dest='public_key',
+      default=os.environ.get('INTERUSS_PUBLIC_KEY'),
+      help='Public key of global authorization authority [or env variable '
+      'INTERUSS_PUBLIC_KEY]',
+      metavar='RSAKEY')
+  parser.add_option(
+      '-a',
+      '--auth_config',
+      dest='auth_config',
+      default=os.environ.get('INTERUSS_AUTH_CONFIG'),
+      help='JSON describing authorization configuration, or path to JSON '
+      'resource [or env variable INTERUSS_AUTH_CONFIG]',
+      metavar='CONFIG')
   (options, args) = parser.parse_args(argv)
   del args
   return options
 
 
-def InitializeConnection(options=None):
+def InitializeConnection(options):
   """Initializes the wrapper and the connection to the zookeeper servers.
 
   The side effects of this method are to set the global variable 'wrapper' and
@@ -994,20 +1009,23 @@ def InitializeConnection(options=None):
   Args:
     options: Options structure with a field per option.
   """
-  global wrapper
-  if (options and options.verbose) or os.environ.get('INTERUSS_VERBOSE'):
+  global wrapper, auth
+
+  if not options.public_key and not options.auth_config:
+    log.error('Public key or auth config must be provided.')
+    sys.exit(-1)
+
+  if options.verbose:
     log.setLevel(logging.DEBUG)
   log.debug('Initializing USS metadata manager...')
-  wrapper = storage_interface.USSMetadataManager(
-      os.getenv('INTERUSS_CONNECTIONSTRING',
-                options.connectionstring if options else None))
-  if (options and options.verbose) or os.environ.get('INTERUSS_VERBOSE'):
+  wrapper = storage_interface.USSMetadataManager(options.connectionstring)
+  if options.verbose:
     wrapper.set_verbose()
-  if (options and options.testid) or os.environ.get('INTERUSS_TESTID'):
-    testid = os.getenv('INTERUSS_TESTID', options.testid if options else None)
-    authorization.SetTestId(testid)
-    wrapper.set_testmode(testid)
-    wrapper.delete_testdata(testid)
+  auth = authorization.Authorizer(options.public_key, options.auth_config)
+  if options.testid:
+    auth.SetTestId(options.testid)
+    wrapper.set_testmode(options.testid)
+    wrapper.delete_testdata(options.testid)
 
 
 def TerminateConnection():
@@ -1018,7 +1036,7 @@ def TerminateConnection():
 @webapp.before_first_request
 def BeforeFirstRequest():
   if wrapper is None:
-    InitializeConnection()
+    InitializeConnection(ParseOptions([]))
 
 
 def main(argv):
