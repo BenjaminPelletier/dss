@@ -64,7 +64,7 @@ def _error(status_code, content):
 
 @webapp.route('/', methods=['GET'])
 @webapp.route('/status', methods=['GET'])
-def status():
+def status_endpoint():
   log.debug('Status requested')
   return flask.jsonify({
     'status': 'success',
@@ -74,7 +74,7 @@ def status():
 
 
 @webapp.route('/client/operation', methods=['POST', 'PUT'])
-def upsert_operation():
+def upsert_operation_endpoint():
   log.debug('Operation upsert requested')
   _validate_control()
   operation = flask.request.json
@@ -85,7 +85,7 @@ def upsert_operation():
 
 
 @webapp.route('/client/operation/<gufi>', methods=['DELETE'])
-def delete_operation(gufi):
+def delete_operation_endpoint(gufi):
   log.debug('Operation deletion requested: %s', gufi)
   _validate_control()
   try:
@@ -99,42 +99,42 @@ def delete_operation(gufi):
 # == USS endpoints ==
 
 @webapp.route('/uvrs/<message_id>', methods=['PUT'])
-def uvrs(message_id):
+def uvrs_endpoint(message_id):
   log.debug('USS/uvrs notified')
   _validate_access_token()
   return '', status.HTTP_204_NO_CONTENT
 
 
 @webapp.route('/utm_messages/<message_id>', methods=['PUT'])
-def UtmMessages(message_id):
+def utm_messages_endpoint(message_id):
   log.debug('USS/utm_messages notified')
   _validate_access_token()
   return '', status.HTTP_204_NO_CONTENT
 
 
 @webapp.route('/uss/<uss_instance_id>', methods=['PUT'])
-def uss_instances(uss_instance_id):
+def uss_instances_endpoint(uss_instance_id):
   log.debug('USS/uss notified')
   _validate_access_token()
   return '', status.HTTP_204_NO_CONTENT
 
 
 @webapp.route('/negotiations/<message_id>', methods=['PUT'])
-def negotiations(message_id):
+def negotiations_endpoint(message_id):
   log.debug('USS/negotiations notified')
   _validate_access_token()
   return '', status.HTTP_204_NO_CONTENT
 
 
 @webapp.route('/positions/<position_id>', methods=['PUT'])
-def positions(position_id):
+def positions_endpoint(position_id):
   log.debug('USS/positions notified')
   _validate_access_token()
   return '', status.HTTP_204_NO_CONTENT
 
 
 @webapp.route('/operations', methods=['GET'])
-def get_operations():
+def get_operations_endpoint():
   log.debug('USS/operations queried')
   _validate_access_token()
   operations = operations_manager.get_operations()
@@ -142,7 +142,7 @@ def get_operations():
 
 
 @webapp.route('/operations/<gufi>', methods=['GET', 'PUT'])
-def operation(gufi):
+def operation_endpoint(gufi):
   _validate_access_token()
   if flask.request.method == 'GET':
     try:
@@ -157,7 +157,7 @@ def operation(gufi):
 
 
 @webapp.route('/enhanced/operations/<gufi>', methods=['GET', 'PUT'])
-def enhanced_operation(gufi):
+def enhanced_operation_endpoint(gufi):
   log.debug('USS/enhanced/operations queried')
   _validate_access_token()
   flask.abort(status.HTTP_500_INTERNAL_SERVER_ERROR,
