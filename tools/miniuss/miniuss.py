@@ -29,6 +29,7 @@ import operations
 
 logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.INFO)
 log = logging.getLogger('MiniUss')
+log.setLevel(logging.DEBUG)
 webapp = flask.Flask(__name__)  # Global object serving the API
 
 
@@ -100,35 +101,35 @@ def delete_operation_endpoint(gufi):
 
 @webapp.route('/uvrs/<message_id>', methods=['PUT'])
 def uvrs_endpoint(message_id):
-  log.debug('USS/uvrs notified')
+  log.debug('USS/uvrs notified of UVR message ID %s', message_id)
   _validate_access_token()
   return '', status.HTTP_204_NO_CONTENT
 
 
 @webapp.route('/utm_messages/<message_id>', methods=['PUT'])
 def utm_messages_endpoint(message_id):
-  log.debug('USS/utm_messages notified')
+  log.debug('USS/utm_messages notified of UTM message ID %s', message_id)
   _validate_access_token()
   return '', status.HTTP_204_NO_CONTENT
 
 
 @webapp.route('/uss/<uss_instance_id>', methods=['PUT'])
 def uss_instances_endpoint(uss_instance_id):
-  log.debug('USS/uss notified')
+  log.debug('USS/uss notified of USS instance ID %s', uss_instance_id)
   _validate_access_token()
   return '', status.HTTP_204_NO_CONTENT
 
 
 @webapp.route('/negotiations/<message_id>', methods=['PUT'])
 def negotiations_endpoint(message_id):
-  log.debug('USS/negotiations notified')
+  log.debug('USS/negotiations request received with message ID %s', message_id)
   _validate_access_token()
   return '', status.HTTP_204_NO_CONTENT
 
 
 @webapp.route('/positions/<position_id>', methods=['PUT'])
 def positions_endpoint(position_id):
-  log.debug('USS/positions notified')
+  log.debug('USS/positions notified with position ID %s', position_id)
   _validate_access_token()
   return '', status.HTTP_204_NO_CONTENT
 
@@ -145,12 +146,14 @@ def get_operations_endpoint():
 def operation_endpoint(gufi):
   _validate_access_token()
   if flask.request.method == 'GET':
+    log.debug('USS/operations/gufi queried for GUFI %s', gufi)
     try:
       operation = operations_manager.get_operation(gufi)
     except KeyError:
       flask.abort(status.HTTP_404_NOT_FOUND, 'No operation with GUFI ' + gufi)
     return flask.jsonify(operation)
   elif flask.request.method == 'PUT':
+    log.debug('Received operation notification with GUFI %s', gufi)
     return '', status.HTTP_204_NO_CONTENT
   else:
     flask.abort(status.HTTP_405_METHOD_NOT_ALLOWED)
@@ -158,7 +161,7 @@ def operation_endpoint(gufi):
 
 @webapp.route('/enhanced/operations/<gufi>', methods=['GET', 'PUT'])
 def enhanced_operation_endpoint(gufi):
-  log.debug('USS/enhanced/operations queried')
+  log.debug('USS/enhanced/operations queried for GUFI %s', gufi)
   _validate_access_token()
   flask.abort(status.HTTP_500_INTERNAL_SERVER_ERROR,
               'Enhanced operations endpoint not yet supported')
@@ -210,6 +213,7 @@ def _validate_access_token(allowed_scopes=None):
 
 
 def initialize(argv):
+  log.debug('Debug-level log messages are visible')
   options = config.parse_options(argv)
 
   global control_authorization
