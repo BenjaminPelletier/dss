@@ -15,9 +15,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
+import datetime
 import jwt
+import json
 import logging
 import sys
+import threading
 
 import flask
 import requests
@@ -45,6 +48,10 @@ public_key = None
 # Content that must be in Authorization header to use control endpoints.
 control_authorization = None
 
+# Bodies of notifications so they can be viewed later.
+notification_lock = threading.Lock()
+notification_logs = {}
+
 
 def _update_operations():
   """Replace Operator entry in grid with current set of Operations."""
@@ -59,6 +66,22 @@ def _update_operations():
 def _error(status_code, content):
   log.error('%d: %s', status_code, content)
   return content, status_code
+
+
+def _log_request_body(key, source):
+  entry = {
+    'received': datetime.datetime.now().isoformat(),
+    'source': source,
+    'notification_content': flask.request.json
+  }
+  with notification_lock:
+    history = notification_logs.get(key, [])
+    history.append(entry)
+    notification_logs[key] = history
+
+
+def _string_to_bool(s):
+  return s.lower() in {'true', 't', 'y', '1', 'yes'}
 
 
 # == Control and status endpoints ==
@@ -97,40 +120,77 @@ def delete_operation_endpoint(gufi):
   return flask.jsonify({'status': 'success'})
 
 
+@webapp.route('/notifications/<notification_key>', methods=['GET'])
+def get_notifications(notification_key):
+  log.debug('Notifications requested: %s', notification_key)
+  _validate_control()
+  with notification_lock:
+    if notification_key in notification_logs:
+      return flask.jsonify(notification_logs[notification_key])
+    else:
+      return _error(
+        status.HTTP_404_NOT_FOUND, 'Key %s not found' % notification_key)
+
+
+@webapp.route('/notifications', methods=['GET', 'DELETE'])
+def del_notifications():
+  log.debug('Notifications queried')
+  _validate_control()
+  if flask.request.method == 'GET':
+    return flask.jsonify({key: [e['source'] + ' ' + e['received']
+                                for e in value]
+                          for key, value in notification_logs.items()})
+  elif flask.request.method == 'DELETE':
+    with notification_lock:
+      n = len(notification_logs)
+      notification_logs.clear()
+      return 'Deleted %d notification keys' % n
+  else:
+    flask.abort(status.HTTP_405_METHOD_NOT_ALLOWED)
+
 # == USS endpoints ==
 
 @webapp.route('/uvrs/<message_id>', methods=['PUT'])
 def uvrs_endpoint(message_id):
-  log.debug('USS/uvrs notified of UVR message ID %s', message_id)
+  log.debug('USS/uvrs accessed')
   _validate_access_token()
+  log.info('>> Notified of UVR update with ID %s', message_id)
+  _log_request_body(message_id, 'uvrs')
   return '', status.HTTP_204_NO_CONTENT
 
 
 @webapp.route('/utm_messages/<message_id>', methods=['PUT'])
 def utm_messages_endpoint(message_id):
-  log.debug('USS/utm_messages notified of UTM message ID %s', message_id)
+  log.debug('USS/utm_messages accessed')
   _validate_access_token()
+  log.info('>> Notified of UTM message with ID %s', message_id)
+  _log_request_body(message_id, 'utm_messages')
   return '', status.HTTP_204_NO_CONTENT
 
 
 @webapp.route('/uss/<uss_instance_id>', methods=['PUT'])
 def uss_instances_endpoint(uss_instance_id):
-  log.debug('USS/uss notified of USS instance ID %s', uss_instance_id)
+  log.debug('USS/uss accessed')
   _validate_access_token()
+  log.debug('>> Notified of USS update with ID %s', uss_instance_id)
+  _log_request_body(uss_instance_id, 'uss')
   return '', status.HTTP_204_NO_CONTENT
 
 
 @webapp.route('/negotiations/<message_id>', methods=['PUT'])
 def negotiations_endpoint(message_id):
-  log.debug('USS/negotiations request received with message ID %s', message_id)
+  log.debug('>> !!! USS/negotiations request received with message ID %s', message_id)
   _validate_access_token()
+  _log_request_body(message_id, 'negotiations')
   return '', status.HTTP_204_NO_CONTENT
 
 
 @webapp.route('/positions/<position_id>', methods=['PUT'])
 def positions_endpoint(position_id):
-  log.debug('USS/positions notified with position ID %s', position_id)
+  log.debug('USS/positions accessed')
   _validate_access_token()
+  log.debug('>> Notified of position update with ID %s', position_id)
+  _log_request_body(position_id, 'positions')
   return '', status.HTTP_204_NO_CONTENT
 
 
@@ -144,16 +204,17 @@ def get_operations_endpoint():
 
 @webapp.route('/operations/<gufi>', methods=['GET', 'PUT'])
 def operation_endpoint(gufi):
+  log.debug('USS/operations/gufi accessed for GUFI %s', gufi)
   _validate_access_token()
   if flask.request.method == 'GET':
-    log.debug('USS/operations/gufi queried for GUFI %s', gufi)
     try:
       operation = operations_manager.get_operation(gufi)
     except KeyError:
       flask.abort(status.HTTP_404_NOT_FOUND, 'No operation with GUFI ' + gufi)
     return flask.jsonify(operation)
   elif flask.request.method == 'PUT':
-    log.debug('Received operation notification with GUFI %s', gufi)
+    log.debug('>> Notified of operation received with GUFI %s', gufi)
+    _log_request_body(gufi, 'operations')
     return '', status.HTTP_204_NO_CONTENT
   else:
     flask.abort(status.HTTP_405_METHOD_NOT_ALLOWED)
@@ -161,10 +222,17 @@ def operation_endpoint(gufi):
 
 @webapp.route('/enhanced/operations/<gufi>', methods=['GET', 'PUT'])
 def enhanced_operation_endpoint(gufi):
-  log.debug('USS/enhanced/operations queried for GUFI %s', gufi)
+  log.debug('USS/enhanced/operations accessed for GUFI %s', gufi)
   _validate_access_token()
-  flask.abort(status.HTTP_500_INTERNAL_SERVER_ERROR,
-              'Enhanced operations endpoint not yet supported')
+  if flask.request.method == 'GET':
+    flask.abort(status.HTTP_500_INTERNAL_SERVER_ERROR,
+                'Enhanced operations endpoint not yet supported')
+  elif flask.request.method == 'PUT':
+    log.debug('>> Notified of enhanced operation received with GUFI %s', gufi)
+    _log_request_body(gufi, 'enhanced_operations')
+    return '', status.HTTP_204_NO_CONTENT
+  else:
+    flask.abort(status.HTTP_405_METHOD_NOT_ALLOWED)
 
 
 @webapp.before_first_request
