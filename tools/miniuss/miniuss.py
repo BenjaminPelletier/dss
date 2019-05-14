@@ -137,9 +137,13 @@ def del_notifications():
   log.debug('Notifications queried')
   _validate_control()
   if flask.request.method == 'GET':
-    return flask.jsonify({key: [e['source'] + ' ' + e['received']
-                                for e in value]
-                          for key, value in notification_logs.items()})
+    if _string_to_bool(flask.request.args.get('full_content', 'false')):
+      with notification_lock:
+        return flask.jsonify(notification_logs)
+    else:
+      return flask.jsonify({key: [e['source'] + ' ' + e['received']
+                                  for e in value]
+                            for key, value in notification_logs.items()})
   elif flask.request.method == 'DELETE':
     with notification_lock:
       n = len(notification_logs)
