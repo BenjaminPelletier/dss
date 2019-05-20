@@ -68,16 +68,20 @@ def _error(status_code, content):
   return content, status_code
 
 
-def _log_request_body(key, source):
+def _log_request_body(key, source, action=None):
   entry = {
     'received': datetime.datetime.now().isoformat(),
     'source': source,
-    'notification_content': flask.request.json
+    'content': flask.request.json,
+    'uss': flask.request.json.get('uss_name', '???')
   }
+  if action:
+    entry['action'] = action
   with notification_lock:
     history = notification_logs.get(key, [])
     history.append(entry)
     notification_logs[key] = history
+  return entry
 
 
 def _string_to_bool(s):
@@ -137,9 +141,21 @@ def del_notifications():
   log.debug('Notifications queried')
   _validate_control()
   if flask.request.method == 'GET':
-    if _string_to_bool(flask.request.args.get('full_content', 'false')):
+    if _string_to_bool(flask.request.args.get('details', 'false')):
       with notification_lock:
-        return flask.jsonify(notification_logs)
+        uss_filter = flask.request.args.get('uss', None)
+        if uss_filter:
+          logs = {key: [e for e in msgs if e['uss'] == uss_filter]
+                  for key, msgs in notification_logs.items()}
+        else:
+          logs = notification_logs
+        exclude_content = _string_to_bool(
+          flask.request.args.get('exclude_content', 'false'))
+        if exclude_content:
+          logs = {key: [{k: v for k, v in value.items() if k != 'content'}
+                        for value in values]
+                  for key, values in logs.items()}
+        return flask.jsonify(logs)
     else:
       return flask.jsonify({key: [e['source'] + ' ' + e['received']
                                   for e in value]
@@ -158,8 +174,9 @@ def del_notifications():
 def uvrs_endpoint(message_id):
   log.debug('USS/uvrs accessed')
   _validate_access_token()
-  log.info('>> Notified of UVR update with ID %s', message_id)
-  _log_request_body(message_id, 'uvrs')
+  entry = _log_request_body(message_id, 'uvrs')
+  log.info('>> Notified of UVR update from %s with ID %s',
+           entry['uss'], message_id)
   return '', status.HTTP_204_NO_CONTENT
 
 
@@ -167,8 +184,10 @@ def uvrs_endpoint(message_id):
 def utm_messages_endpoint(message_id):
   log.debug('USS/utm_messages accessed')
   _validate_access_token()
-  log.info('>> Notified of UTM message with ID %s', message_id)
-  _log_request_body(message_id, 'utm_messages')
+  entry = _log_request_body(
+    message_id, 'utm_messages', flask.request.json.get('message_type', '???'))
+  log.info('>> Notified of UTM message %s from %s with ID %s',
+           entry['action'], entry['uss'], message_id)
   return '', status.HTTP_204_NO_CONTENT
 
 
@@ -176,14 +195,16 @@ def utm_messages_endpoint(message_id):
 def uss_instances_endpoint(uss_instance_id):
   log.debug('USS/uss accessed')
   _validate_access_token()
-  log.debug('>> Notified of USS update with ID %s', uss_instance_id)
-  _log_request_body(uss_instance_id, 'uss')
+  entry = _log_request_body(uss_instance_id, 'uss')
+  log.info('>> Notified of USS update from %s with ID %s',
+           entry['uss'], uss_instance_id)
   return '', status.HTTP_204_NO_CONTENT
 
 
 @webapp.route('/negotiations/<message_id>', methods=['PUT'])
 def negotiations_endpoint(message_id):
-  log.debug('>> !!! USS/negotiations request received with message ID %s', message_id)
+  log.debug('>> !!!USS/negotiations request received with message ID %s',
+            message_id)
   _validate_access_token()
   _log_request_body(message_id, 'negotiations')
   return '', status.HTTP_204_NO_CONTENT
@@ -193,8 +214,9 @@ def negotiations_endpoint(message_id):
 def positions_endpoint(position_id):
   log.debug('USS/positions accessed')
   _validate_access_token()
-  log.debug('>> Notified of position update with ID %s', position_id)
-  _log_request_body(position_id, 'positions')
+  entry = _log_request_body(position_id, 'positions')
+  log.info('>> Notified of position update from %s with ID %s',
+           entry['uss'], position_id)
   return '', status.HTTP_204_NO_CONTENT
 
 
@@ -217,8 +239,10 @@ def operation_endpoint(gufi):
       flask.abort(status.HTTP_404_NOT_FOUND, 'No operation with GUFI ' + gufi)
     return flask.jsonify(operation)
   elif flask.request.method == 'PUT':
-    log.debug('>> Notified of operation received with GUFI %s', gufi)
-    _log_request_body(gufi, 'operations')
+    entry = _log_request_body(
+      gufi, 'operations', flask.request.json.get('state', '???'))
+    log.info('>> Notified of operation %s received from %s with GUFI %s',
+             entry['action'], entry['uss'], gufi)
     return '', status.HTTP_204_NO_CONTENT
   else:
     flask.abort(status.HTTP_405_METHOD_NOT_ALLOWED)
@@ -232,7 +256,7 @@ def enhanced_operation_endpoint(gufi):
     flask.abort(status.HTTP_500_INTERNAL_SERVER_ERROR,
                 'Enhanced operations endpoint not yet supported')
   elif flask.request.method == 'PUT':
-    log.debug('>> Notified of enhanced operation received with GUFI %s', gufi)
+    log.info('>> !!!Notified of enhanced operation received with GUFI %s', gufi)
     _log_request_body(gufi, 'enhanced_operations')
     return '', status.HTTP_204_NO_CONTENT
   else:
