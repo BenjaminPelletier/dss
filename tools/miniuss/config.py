@@ -95,6 +95,24 @@ def parse_options(argv):
     default=os.getenv('MINIUSS_CONTROL_AUTHORIZATION', 'miniuss'),
     help='Content of Authorization header required to access control endpoints',
     metavar='HEADERVALUE')
+  parser.add_option(
+    '--alwayslisten',
+    dest='always_listen',
+    default=os.getenv('MINIUSS_ALWAYS_LISTEN', '10/282/397'),
+    help='Comma-separated grid cell(s) in which to always have a operator entry',
+    metavar='CELLS')
+  parser.add_option(
+    '--minlistentime',
+    dest='min_listen_time',
+    default=os.getenv('MINIUSS_MIN_LISTEN_TIME', '2019-03-01T00:00:00.000Z'),
+    help='minimum_operation_timestamp for observer-only cells',
+    metavar='TIMESTAMP')
+  parser.add_option(
+    '--maxlistentime',
+    dest='max_listen_time',
+    default=os.getenv('MINIUSS_MIN_LISTEN_TIME', '2019-07-01T00:00:00.000Z'),
+    help='maximum_operation_timestamp for observer-only cells',
+    metavar='TIMESTAMP')
   (options, args) = parser.parse_args(argv)
   del args
 

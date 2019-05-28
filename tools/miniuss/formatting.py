@@ -31,6 +31,8 @@ def timestamp(timestamp=None):
     s = '%s.%03d%s' % (s[:s.index('.')], r.microsecond // 1000, s[-6:])
   else:
     s = '%s.%03d%s' % (s[:-6], r.microsecond // 1000, s[-6:])
+  if '+' in s:
+    s = s[0:s.index('+')] + 'Z'
   return s
 
 

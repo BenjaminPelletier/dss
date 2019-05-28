@@ -16,19 +16,20 @@ limitations under the License.
 """
 
 import datetime
-import jwt
-import json
 import logging
+import os
+import re
 import sys
 import threading
 
 import flask
+import jwt
 import requests
 from rest_framework import status
 
 import config
+import formatting
 import interuss_platform
-import operations
 
 logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.INFO)
 log = logging.getLogger('MiniUss')
@@ -39,8 +40,11 @@ webapp = flask.Flask(__name__)  # Global object serving the API
 # interuss_platform.Client managing communication with InterUSS Platform grid.
 grid_client = None
 
-# operations.Manager managing operations for this USS.
-operations_manager = None
+# operations for this USS by GUFI.
+operations = {}
+
+# UVRs for this USS by ID.
+uvrs = {}
 
 # Public key for validating access tokens at USS endpoints.
 public_key = None
@@ -52,15 +56,29 @@ control_authorization = None
 notification_lock = threading.Lock()
 notification_logs = {}
 
+# Slippy cells in which to always listen for notifications.
+always_listen = []
 
-def _update_operations():
+# Bounds for operator entry beyond operations' bounds.
+min_listen_time = None
+max_listen_time = None
+
+
+def _update_operations(new_gufi=None):
   """Replace Operator entry in grid with current set of Operations."""
   try:
-    grid_client.upsert_operator(operations_manager.get_operations())
+    grid_client.upsert_operator(operations.values(), min_listen_time, max_listen_time)
   except requests.HTTPError as e:
     msg = ('Error updating InterUSS Platform Operator entry: ' +
            e.response.content)
     flask.abort(e.response.status_code, msg)
+
+  for slippy_cell in always_listen:
+    try:
+      grid_client.insert_observer(slippy_cell, min_listen_time, max_listen_time)
+    except requests.HTTPError as e:
+      msg = 'Error inserting observer Operator into cell %s: %s' % (slippy_cell, e.response.content)
+      flask.abort(e.response.status_code, msg)
 
 
 def _error(status_code, content):
@@ -96,32 +114,130 @@ def status_endpoint():
   log.debug('Status requested')
   return flask.jsonify({
     'status': 'success',
-    'operations': [{'gufi': op.operation['gufi'], 'hidden': op.hidden}
-                   for op in operations_manager.get_managed_operations()],
+    'operations': operations.keys(),
     'uss_baseurl': grid_client.uss_baseurl})
 
 
-@webapp.route('/client/operation', methods=['POST', 'PUT'])
-def upsert_operation_endpoint():
-  log.debug('Operation upsert requested')
-  _validate_control()
-  operation = flask.request.json
-  operations_manager.upsert_operation(operation)
-  _update_operations()
-  return flask.jsonify({'status': 'success',
-                        'operation': operation})
+@webapp.route('/client/alwayslisten', methods=['GET', 'PUT'])
+def alwayslisten_endpoint():
+  global always_listen
+  if flask.request.method == 'GET':
+    return flask.jsonify(always_listen)
+  elif flask.request.method == 'PUT':
+    _validate_control()
+    cells = flask.request.json
+    for slippy_cell in cells:
+      if not re.match(r'\d+/\d+/\d+', slippy_cell):
+        return _error(status.HTTP_400_BAD_REQUEST, 'Invalid slippy cell: %s' % slippy_cell)
+    always_listen = cells
+    _update_operations()
+    return '', status.HTTP_204_NO_CONTENT
+  else:
+    flask.abort(status.HTTP_405_METHOD_NOT_ALLOWED)
 
 
-@webapp.route('/client/operation/<gufi>', methods=['DELETE'])
-def delete_operation_endpoint(gufi):
-  log.debug('Operation deletion requested: %s', gufi)
+@webapp.route('/client/operator_entries', methods=['DELETE'])
+def operator_entries_endpoint():
   _validate_control()
-  try:
-    operations_manager.remove_operation(gufi)
-  except KeyError:
-    return _error(status.HTTP_404_NOT_FOUND, 'GUFI %s not found' % gufi)
-  _update_operations()
-  return flask.jsonify({'status': 'success'})
+  cells = flask.request.json
+  result = {}
+  for slippy_cell in cells:
+    if not re.match(r'\d+/\d+/\d+', slippy_cell):
+      return _error(status.HTTP_400_BAD_REQUEST, 'Invalid slippy cell: %s' % slippy_cell)
+    response = grid_client.remove_operator_by_cell(slippy_cell)
+    result[slippy_cell] = {'code': response.status_code,
+                           'content': response.json() if response.status_code == 200 else response.content}
+  return flask.jsonify(result)
+
+
+@webapp.route('/client/operation/<gufi>', methods=['GET', 'PUT', 'DELETE'])
+def client_operation_endpoint(gufi):
+  if flask.request.method == 'GET':
+    if gufi in operations:
+      return flask.jsonify(operations[gufi])
+    else:
+      flask.abort(status.HTTP_404_NOT_FOUND)
+  elif flask.request.method == 'PUT':
+    log.debug('Operation upsert requested')
+    _validate_control()
+    operation = flask.request.json
+    operations[operation['gufi']] = operation
+    _update_operations(operation['gufi'])
+    return flask.jsonify(operation)
+  elif flask.request.method == 'DELETE':
+    log.debug('Operation deletion requested: %s', gufi)
+    _validate_control()
+    if gufi in operations:
+      del operations[gufi]
+    else:
+      return _error(status.HTTP_404_NOT_FOUND, 'GUFI %s not found' % gufi)
+    _update_operations(gufi)
+    return '', status.HTTP_204_NO_CONTENT
+  else:
+    flask.abort(status.HTTP_405_METHOD_NOT_ALLOWED)
+
+
+@webapp.route('/client/uvr/<message_id>', methods=['GET', 'PUT', 'DELETE'])
+def client_uvr_endpoint(message_id):
+  global uvrs
+  if flask.request.method == 'GET':
+    if message_id in uvrs:
+      return flask.jsonify(uvrs[message_id])
+    else:
+      flask.abort(status.HTTP_404_NOT_FOUND)
+  elif flask.request.method == 'PUT':
+    log.debug('UVR upsert requested')
+    _validate_control()
+
+    # Emplace UVR in InterUSS Platform grid
+    uvr = flask.request.json
+    try:
+      grid_contents = grid_client.upsert_uvr(uvr)
+    except requests.HTTPError as e:
+      return _error(e.response.status_code, str(e))
+    uvr = [u for u in grid_contents['data']['uvrs'] if u['message_id'] == message_id][0]
+    uvrs[uvr['message_id']] = uvr
+
+    # Notify operators of new UVR
+    response = {'uvr': uvr, 'notifications': {}}
+    operators = [op for op in grid_contents['data']['operators'] if op['announcement_level'] == 'ALL']
+    for op in operators:
+      url = os.path.join(op['uss_baseurl'], 'uvrs', uvr['message_id'])
+      result = requests.put(url, headers=grid_client.get_header(interuss_platform.UVR_SCOPE), json=uvr)
+      response['notifications'][op['uss']] = {'code': result.status_code, 'content': result.content}
+      log.info('Notified %s of UVR: %d %s', url, result.status_code, result.content)
+
+    return flask.jsonify(response)
+  elif flask.request.method == 'DELETE':
+    log.debug('UVR deletion requested: %s', message_id)
+    _validate_control()
+    if message_id in uvrs:
+      # We're aware of this UVR; that makes removal easy
+      try:
+        grid_client.remove_uvr(uvrs[message_id])
+        del uvrs[message_id]
+      except requests.HTTPError as e:
+        return _error(e.response.status_code, str(e))
+    else:
+      log.info('UVR %s not found; reading from grid', message_id)
+      # We're not aware of this UVR; let's try to get details from the grid
+      uvr = flask.request.json
+      area = [interuss_platform.Coord(p[1], p[0]) for p in uvr['geography']['coordinates'][0]]
+      _, grid_uvrs, _ = grid_client.get_operators_by_area(area)
+      grid_uvrs = [u for u in grid_uvrs if u['message_id'] == message_id]
+      if grid_uvrs:
+        # Delete the UVR according to the details retrieved from the grid
+        uvr = grid_uvrs[0]
+        try:
+          grid_client.remove_uvr(uvr)
+        except requests.HTTPError as e:
+          return _error(e.response.status_code, str(e))
+      else:
+        # The requested UVR doesn't seem to be in the grid
+        return _error(status.HTTP_404_NOT_FOUND, 'UVR %s not found' % message_id)
+    return '', status.HTTP_204_NO_CONTENT
+  else:
+    flask.abort(status.HTTP_405_METHOD_NOT_ALLOWED)
 
 
 @webapp.route('/notifications/<notification_key>', methods=['GET'])
@@ -224,8 +340,7 @@ def positions_endpoint(position_id):
 def get_operations_endpoint():
   log.debug('USS/operations queried')
   _validate_access_token()
-  operations = operations_manager.get_operations()
-  return flask.jsonify(operations)
+  return flask.jsonify(operations.values())
 
 
 @webapp.route('/operations/<gufi>', methods=['GET', 'PUT'])
@@ -233,11 +348,10 @@ def operation_endpoint(gufi):
   log.debug('USS/operations/gufi accessed for GUFI %s', gufi)
   _validate_access_token()
   if flask.request.method == 'GET':
-    try:
-      operation = operations_manager.get_operation(gufi)
-    except KeyError:
+    if gufi in operations:
+      return flask.jsonify(operations[gufi])
+    else:
       flask.abort(status.HTTP_404_NOT_FOUND, 'No operation with GUFI ' + gufi)
-    return flask.jsonify(operation)
   elif flask.request.method == 'PUT':
     entry = _log_request_body(
       gufi, 'operations', flask.request.json.get('state', '???'))
@@ -332,8 +446,13 @@ def initialize(argv):
     options.nodeurl, int(options.zoom), options.authurl, options.username,
     options.password, options.baseurl)
 
-  global operations_manager
-  operations_manager = operations.Manager()
+  global always_listen
+  always_listen = options.always_listen.split(',')
+
+  global min_listen_time
+  min_listen_time = formatting.parse_timestamp(options.min_listen_time)
+  global max_listen_time
+  max_listen_time = formatting.parse_timestamp(options.max_listen_time)
 
   return options
 
