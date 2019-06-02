@@ -28,13 +28,33 @@ import requests
 import sys
 import uuid
 
-import formatting
 from rest_framework import status
 import tzlocal
+
+import formatting
+import interuss_platform
 
 logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.INFO)
 log = logging.getLogger('MiniUssCmd')
 log.setLevel(logging.DEBUG)
+
+
+def get_operation_info(args):
+  if not args.id:
+    log.error('Missing id argument')
+    sys.exit(1)
+  if not args.authurl:
+    log.error('Missing authurl argument')
+    sys.exit(1)
+  if not args.authkey:
+    log.error('Missing authkey argument')
+    sys.exit(1)
+  token_manager = interuss_platform.TokenManager(args.authurl, args.authkey)
+  url = os.path.join(args.ussurl, 'operations', args.id)
+  headers = {'Authorization': 'Bearer ' + token_manager.get_token('utm.nasa.gov_write.operation')}
+  response = requests.get(url, headers=headers)
+  response.raise_for_status()
+  log.info('Operation info: ' + json.dumps(response.json(), indent=2))
 
 
 def add_uvr(args):
@@ -243,6 +263,20 @@ def main(argv):
                       metavar='HEADERVALUE')
   parser.add_argument('--slippycells', dest='slippy_cells', default='',
                       help=('Comma-separated list of Slippy cells like 10/282/397'), metavar='CELLS')
+
+  parser.add_argument('--nodeurl', dest='nodeurl',
+                      default=os.getenv('MINIUSS_NODEURL', 'https://node3.upp.interussplatform.com:8121'),
+                      help='Base URL of InterUSS Platform data node', metavar='URL')
+  parser.add_argument('--authurl', dest='authurl',
+                      default=os.getenv('MINIUSS_AUTHURL', 'https://uas-api.faa.gov/fimsAuthServer/oauth/token?grant_type=client_credentials'),
+                      help='URL at which to retrieve access tokens', metavar='URL')
+  parser.add_argument('--authkey', dest='authkey', default=os.environ.get('AUTH_KEY', None),
+                      help='Base64-encoded username and password to pass to the OAuth server as '
+                           'Basic XXX in the Authentication header. Defaults to AUTH_KEY '
+                           'environment variable if defined',
+                      metavar='AUTH_KEY')
+  parser.add_argument('--ussurl', dest='ussurl', default='https://wing-prod-uss.googleapis.com/tcl4',
+                      help='Base URL of USS to interact with', metavar='URL')
   args = parser.parse_args()
 
   # Compute effective time bounds, replacing supplied arguments
