@@ -73,8 +73,8 @@ def add_uvr(args):
     response_json = response.json()
     min_time = formatting.parse_timestamp(response_json['uvr']['effective_time_begin'])
     max_time = formatting.parse_timestamp(response_json['uvr']['effective_time_end'])
-    log.info('Success adding UVR %s from %s to %s (current time %s)', response_json['message_id'], min_time, max_time,
-             formatting.timestamp(datetime.datetime.utcnow()))
+    log.info('Success adding UVR %s from %s to %s (current time %s)', response_json['uvr']['message_id'],
+             min_time, max_time, formatting.timestamp(datetime.datetime.utcnow()))
   else:
     log.error('Error %d while trying to add UVR %s: %s', response.status_code, message_id, response.content)
 
@@ -110,7 +110,7 @@ def remove_operator_entry(args):
   if not args.slippy_cells:
     log.error('Missing slippy_cells argument')
     sys.exit(1)
-  url = os.path.join(args.miniuss_url, 'operator_entries')
+  url = os.path.join(args.miniuss_url, 'client', 'operator_entries')
   response = requests.delete(url, json=args.slippy_cells.split(','),
                              headers={'Authorization': args.control_authorization})
   response.raise_for_status()
@@ -121,7 +121,7 @@ def list_alwayslisten(args):
   if not args.miniuss_url:
     log.error('Missing miniuss_url argument')
     sys.exit(1)
-  url = os.path.join(args.miniuss_url, 'alwayslisten')
+  url = os.path.join(args.miniuss_url, 'client', 'alwayslisten')
   response = requests.get(url)
   response.raise_for_status()
   log.info('miniuss always listening to cells {%s}', ', '.join(response.json()))
@@ -134,12 +134,12 @@ def set_alwayslisten(args):
   if not args.slippy_cells:
     log.error('Missing slippy_cells argument')
     sys.exit(1)
-  url = os.path.join(args.miniuss_url, 'alwayslisten')
+  url = os.path.join(args.miniuss_url, 'client', 'alwayslisten')
   response = requests.put(url, json=args.slippy_cells.split(','),
                           headers={'Authorization': args.control_authorization})
   response.raise_for_status()
   if response.status_code == status.HTTP_204_NO_CONTENT:
-    log.info('miniuss will now always listen to announcements in cells ' + args.always_listen)
+    log.info('miniuss will now always listen to announcements in cells ' + args.slippy_cells)
 
 
 def list_operations(args):
@@ -253,7 +253,7 @@ def main(argv):
     end_time = datetime.datetime.strptime(args.end_time, '%H:%M')
     end_time = now.replace(hour=end_time.hour, minute=end_time.minute, second=0, microsecond=0)
   else:
-    end_time = now + datetime.timedelta(minutes=args.duration)
+    end_time = start_time + datetime.timedelta(minutes=args.duration)
   args.start_time = start_time
   args.end_time = end_time
 

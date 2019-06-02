@@ -203,7 +203,11 @@ def client_uvr_endpoint(message_id):
     operators = [op for op in grid_contents['data']['operators'] if op['announcement_level'] == 'ALL']
     for op in operators:
       url = os.path.join(op['uss_baseurl'], 'uvrs', uvr['message_id'])
-      result = requests.put(url, headers=grid_client.get_header(interuss_platform.UVR_SCOPE), json=uvr)
+      if grid_client.uss_baseurl in url:
+        log.debug('Skipping notifying %s of UVR', url)
+        continue
+      log.debug('Notifying %s of UVR', url)
+      result = requests.put(url, headers=grid_client.get_header(interuss_platform.UVR_SCOPE), json=uvr, timeout=5)
       response['notifications'][op['uss']] = {'code': result.status_code, 'content': result.content}
       log.info('Notified %s of UVR: %d %s', url, result.status_code, result.content)
 
