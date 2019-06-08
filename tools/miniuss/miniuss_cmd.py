@@ -39,6 +39,22 @@ log = logging.getLogger('MiniUssCmd')
 log.setLevel(logging.DEBUG)
 
 
+def close_operation(args):
+  if not args.id:
+    log.error('Missing id argument')
+    sys.exit(1)
+  if not args.authurl:
+    log.error('Missing authurl argument')
+    sys.exit(1)
+  if not args.authkey:
+    log.error('Missing authkey argument')
+    sys.exit(1)
+  if not args.nodeurl:
+    log.error('Missing ussurl argument')
+    sys.exit(1)
+  raise NotImplementedError('close_operation not yet supported')
+
+
 def get_operation_info(args):
   if not args.id:
     log.error('Missing id argument')
@@ -48,6 +64,9 @@ def get_operation_info(args):
     sys.exit(1)
   if not args.authkey:
     log.error('Missing authkey argument')
+    sys.exit(1)
+  if not args.ussurl:
+    log.error('Missing ussurl argument')
     sys.exit(1)
   token_manager = interuss_platform.TokenManager(args.authurl, args.authkey)
   url = os.path.join(args.ussurl, 'operations', args.id)
