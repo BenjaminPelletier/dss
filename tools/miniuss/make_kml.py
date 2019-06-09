@@ -263,29 +263,45 @@ def main(argv):
     updates = list(sorted(updates, key=lambda update_item: update_item['update_time']))
     synth_op = copy.deepcopy(updates[0])
     synth_op['operation_volumes'] = []
+    future_vols = {}
     for update in updates:
       update_time = update['update_time']
       synth_vols = []
 
-      # Include only existing volumes with at least some time before this update, trimmed to this update
+      # Include only existing volumes that started before this update, trimmed to this update
       for vol in synth_op['operation_volumes']:
         if vol['effective_time_begin'] >= update_time:
+          # Truncate the anticipation of future volume at this point
+          future_vol = future_vols[vol['name']]
+          future_vol['effective_time_end'] = update_time
           continue
         if vol['effective_time_end'] > update_time:
           vol['effective_time_end'] = update_time
         synth_vols.append(vol)
 
-      # Include only new volumes with at least some time after this update, trimmed to this update
+      # Incorporate volumes from new update
       for vol in update['operation_volumes']:
+        vol['future'] = False
         if vol['effective_time_end'] <= update_time:
+          # Do not include volumes from this update that ended in the past
           continue
+        vol['name'] = str(vol['ordinal']) + ' ' + datetime.datetime.strftime(update['update_time'], '%H:%M:%S')
         if vol['effective_time_begin'] < update_time:
+          # Trim current volumes to start at this update
           vol['effective_time_begin'] = update_time
           vol['original_time_begin'] = False
-        vol['name'] = str(vol['ordinal']) + ' ' + datetime.datetime.strftime(update['update_time'], '%H:%M:%S')
+        else:
+          # A future volume to anticipate this volume starting in the future
+          future_vol = copy.deepcopy(vol)
+          future_vol['future'] = True
+          future_vol['effective_time_begin'] = update_time
+          future_vol['effective_time_end'] = vol['effective_time_begin']
+          future_vols[vol['name']] = future_vol
         synth_vols.append(vol)
 
+      synth_vols.extend(future_vols.values())
       synth_op['operation_volumes'] = synth_vols
+      synth_op['announce_time'] = update_time
     ops.append(synth_op)
 
   # Trim synthesis operations according to time in which the operations were in the grid, and snap submit_time to grid
@@ -311,25 +327,19 @@ def main(argv):
   add_style(doc, 'op_active', line_color='#ff37d7fb', line_width=2.0, poly_color='#7d37d7fb')
   add_style(doc, 'op_future', line_color='#ff864d2b', line_width=1.0, poly_color='#00000000')
   add_style(doc, 'uvr_active', line_color='#ff0000ff', line_width=2.0, poly_color='#800000ff')
-  add_style(doc, 'uvr_future', line_color='#ff0000a0', line_width=1.0, poly_color='#300000a0')
+  add_style(doc, 'uvr_future', line_color='#ff0040a0', line_width=1.0, poly_color='#300040a0')
 
   if ops:
     ops_folder = add_folder(doc, 'Operations')
     for op in sorted(ops, key=lambda op_item: op_item['submit_time']):
-      submit_time = op['submit_time']
       time_name = datetime.datetime.strftime(op['submit_time'], '%H:%M:%S')
       folder = add_folder(ops_folder, '%s %s %s' % (time_name, op['uss_name'], op['gufi']))
       for volume in op['operation_volumes']:
-        # Show future volumes at time of submission
-        if volume['original_time_begin'] and volume['effective_time_begin'] > submit_time:
-          future_volume = copy.deepcopy(volume)
-          future_volume['effective_time_begin'] = op['submit_time']
-          future_volume['effective_time_end'] = min(volume['effective_time_begin'], volume['effective_time_end'])
-          add_volume(folder, future_volume, 'Future ' + str(volume['name']), args.altitude_offset, 'op_future')
-
-        # Write active volumes
         if volume['effective_time_end'] >= volume['effective_time_begin']:
-          add_volume(folder, volume, volume['name'], args.altitude_offset, 'op_active')
+          if volume['future']:
+            add_volume(folder, volume, 'Future ' + str(volume['name']), args.altitude_offset, 'op_future')
+          else:
+            add_volume(folder, volume, volume['name'], args.altitude_offset, 'op_active')
 
   if uvrs:
     uvrs_folder = add_folder(doc, 'UVRs')
