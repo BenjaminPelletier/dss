@@ -185,6 +185,7 @@ class Client(object):
     if max_time and max_time > max_timestamp:
       max_timestamp = max_time
     coords = ','.join('%.6f,%.6f' % (p.lat, p.lng) for p in area)
+    log.info('upsert_operator coords are ' + coords)
     response = requests.put(
       url=self._base_url + '/GridCellsOperator/%d' % self._zoom,
       headers=self.get_header(INTERUSS_SCOPE),
