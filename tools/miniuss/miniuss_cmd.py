@@ -50,9 +50,45 @@ def close_operation(args):
     log.error('Missing authkey argument')
     sys.exit(1)
   if not args.nodeurl:
+    log.error('Missing nodeurl argument')
+    sys.exit(1)
+  if not args.slippy_cells:
+    log.error('Missing slippycells argument')
+    sys.exit(1)
+  if not args.ussname:
+    log.error('Missing ussname argument')
+    sys.exit(1)
+  if not args.ussurl:
     log.error('Missing ussurl argument')
     sys.exit(1)
-  raise NotImplementedError('close_operation not yet supported')
+  token_manager = interuss_platform.TokenManager(args.authurl, args.authkey)
+  uss_urls = set()
+  for slippy_cell in args.slippy_cells.split(','):
+    log.info('Getting operators for cell ' + slippy_cell)
+    url = os.path.join(args.nodeurl, 'GridCellOperator', slippy_cell)
+    headers = {'Authorization': 'Bearer ' + token_manager.get_token('utm.nasa.gov_write.conflictmanagement')}
+    response = requests.get(url, headers=headers)
+    response.raise_for_status()
+    for operator in response.json()['data']['operators']:
+      if operator['uss'] == args.ussname:
+        continue
+      uss_urls.add(operator['uss_baseurl'])
+  msg = {
+    "callback": args.ussurl,
+    "gufi": args.id,
+    "message_id": str(uuid.uuid4()),
+    "message_type": "OPERATION_CLOSED",
+    "severity": "NOTICE",
+    "time_sent": formatting.timestamp(datetime.datetime.utcnow()),
+    "uss_name": args.ussname
+  }
+  headers = {'Authorization': 'Bearer ' + token_manager.get_token('utm.nasa.gov_write.message')}
+  for uss_url in uss_urls:
+    log.info('Sending OPERATOR_CLOSED message to ' + uss_url)
+    url = os.path.join(uss_url, 'utm_messages', msg['message_id'])
+    response = requests.put(url, headers=headers, json=msg)
+    if response.status_code != 204 and response.status_code != 200:
+      log.error('Error notifying %s: %s', url, response.content)
 
 
 def get_operation_info(args):
@@ -296,6 +332,7 @@ def main(argv):
                       metavar='AUTH_KEY')
   parser.add_argument('--ussurl', dest='ussurl', default='https://wing-prod-uss.googleapis.com/tcl4',
                       help='Base URL of USS to interact with', metavar='URL')
+  parser.add_argument('--ussname', dest='ussname', default='wing', help='Name of USS', metavar='NAME')
   args = parser.parse_args()
 
   # Compute effective time bounds, replacing supplied arguments
