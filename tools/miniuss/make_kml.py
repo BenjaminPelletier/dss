@@ -131,7 +131,6 @@ def add_volume(folder, volume, name, offset, style):
 
   return pm
 
-
 def main(argv):
   del argv
 
@@ -166,7 +165,6 @@ def main(argv):
   updated_before = formatting.parse_timestamp(args.updated_before) if args.updated_before else T_MAX
 
   # Read operation and grid updates
-  #/Users/pelletierb/Downloads/uc4_20190604/*.json op_*.json --submitted_after 2019-06-04T18:00:00Z --submitted_before 2019-06-04T20:00:00Z
   op_updates = {}
   grid_updates = []
   for pattern in args.updates:
@@ -270,7 +268,7 @@ def main(argv):
 
       # Include only existing volumes that started before this update, trimmed to this update
       for vol in synth_op['operation_volumes']:
-        if vol['effective_time_begin'] >= update_time:
+        if vol['effective_time_begin'] >= update_time and vol['name'] in future_vols:
           # Truncate the anticipation of future volume at this point
           future_vol = future_vols[vol['name']]
           future_vol['effective_time_end'] = update_time
