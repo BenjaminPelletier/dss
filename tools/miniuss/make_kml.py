@@ -21,6 +21,7 @@ limitations under the License.
 import argparse
 import collections
 import copy
+import csv
 import datetime
 import glob
 import json
@@ -35,8 +36,10 @@ import formatting
 
 # KML Namespace
 KMLNS = 'http://www.opengis.net/kml/2.2'
+GXNS = 'http://www.google.com/kml/ext/2.2'
 KML = '{%s}' % KMLNS
-NSMAP = {None: KMLNS}
+GX = '{%s}' % GXNS
+NSMAP = {None: KMLNS, 'gx': GXNS}
 TIME_FORMAT = '%Y-%m-%dT%H:%M:%SZ'
 FEET_TO_METERS = 0.3048
 T_MIN = datetime.datetime.min.replace(tzinfo=pytz.utc)
@@ -53,7 +56,7 @@ def add_folder(parent, name):
   return folder
 
 
-def add_style(doc, name, poly_color=None, poly_fill=None, poly_outline=None, line_color=None, line_width=None):
+def add_style(doc, name, poly_color=None, poly_fill=None, poly_outline=None, line_color=None, line_width=None, icon_href=None):
   style = etree.SubElement(doc, 'Style')
   style.attrib['id'] = name
   if poly_fill is not None or poly_outline is not None or poly_color:
@@ -71,6 +74,11 @@ def add_style(doc, name, poly_color=None, poly_fill=None, poly_outline=None, lin
       add_tag_value(ls, KML + 'color', line_color)
     if line_width is not None:
       add_tag_value(ls, KML + 'width', line_width)
+
+  if icon_href is not None:
+    icon_style = etree.SubElement(style, 'IconStyle')
+    icon = etree.SubElement(icon_style, 'Icon')
+    add_tag_value(icon, 'href', icon_href)
 
 
 def add_tag_value(element, tag, value):
@@ -131,6 +139,19 @@ def add_volume(folder, volume, name, offset, style):
 
   return pm
 
+
+def add_track(folder, telemetry_points, name):
+  pm = etree.SubElement(folder, KML + 'Placemark')
+  add_name(pm, name)
+  add_tag_value(pm, 'styleUrl', '#track')
+  track = etree.SubElement(pm, GX + 'Track')
+  add_tag_value(track, 'altitudeMode', 'absolute')
+  for telemetry in telemetry_points:
+    add_tag_value(track, 'when', formatting.timestamp(telemetry.timestamp))
+  for telemetry in telemetry_points:
+    add_tag_value(track, GX + 'coord', '%.6f %.6f %.2f' % (telemetry.lng, telemetry.lat, telemetry.alt))
+
+
 def main(argv):
   del argv
 
@@ -155,6 +176,9 @@ def main(argv):
     help='The adjustment that should be applied to WGS84 altitudes for them to be displayed in an EGM96 system. If '
          'WGS84 altitude is lower than EGM96, this value should be positive. If the geoid height is negative, this '
          'value should be positive.  Near 37.197, -80.571, this offset should be about +32.59.')
+  parser.add_argument('--telemetry', dest='telemetry', default='', metavar='CSV_FILENAME',
+                      help='A telemetry CSV file containing columns GUFI,Timestamp,Latitude (degrees),Longitude '
+                           '(degrees),Altitude (meters WGS84)')
   args = parser.parse_args()
 
   volumes_after = formatting.parse_timestamp(args.volumes_after) if args.volumes_after else T_MIN
@@ -209,6 +233,24 @@ def main(argv):
           uvr['effective_time_end'] = formatting.parse_timestamp(uvr['effective_time_end'])
         grid_updates.append(update)
   grid_updates = list(sorted(grid_updates, key=lambda update: update['data']['version']))
+
+  # Read telemetry
+  Telemetry = collections.namedtuple('Telemetry', ('timestamp', 'lat', 'lng', 'alt'))
+  telemetry_by_gufi = {}
+  if args.telemetry:
+    with open(args.telemetry) as f:
+      reader = csv.reader(f)
+      for row in reader:
+        telemetry = Telemetry(formatting.parse_timestamp(row[1]),
+                              float(row[2]), float(row[3]), float(row[4]) + args.altitude_offset)
+        gufi = row[0]
+        if gufi in telemetry_by_gufi:
+          telemetry_by_gufi[gufi].append(telemetry)
+        else:
+          telemetry_by_gufi[gufi] = [telemetry]
+    for gufi in telemetry_by_gufi:
+      telemetry_by_gufi[gufi] = list(sorted(telemetry_by_gufi[gufi], key=lambda t: t.timestamp))
+
 
   # Find UVRs
   uvrs = []
@@ -326,10 +368,16 @@ def main(argv):
   add_style(doc, 'op_future', line_color='#ff864d2b', line_width=1.0, poly_color='#00000000')
   add_style(doc, 'uvr_active', line_color='#ff0000ff', line_width=2.0, poly_color='#800000ff')
   add_style(doc, 'uvr_future', line_color='#ff0040a0', line_width=1.0, poly_color='#300040a0')
+  if telemetry_by_gufi:
+    add_style(doc, 'track', line_color='99ffac59', line_width=6,
+              icon_href='http://earth.google.com/images/kml-icons/track-directional/track-0.png')
 
   if ops:
     ops_folder = add_folder(doc, 'Operations')
     for op in sorted(ops, key=lambda op_item: op_item['submit_time']):
+      if telemetry_by_gufi and op['uss_name'] == 'wing' and op['gufi'] not in telemetry_by_gufi:
+        continue  # Do not display unflown Wing flights
+
       time_name = datetime.datetime.strftime(op['submit_time'], '%H:%M:%S')
       folder = add_folder(ops_folder, '%s %s %s' % (time_name, op['uss_name'], op['gufi']))
       for volume in op['operation_volumes']:
@@ -338,6 +386,10 @@ def main(argv):
             add_volume(folder, volume, 'Future ' + str(volume['name']), args.altitude_offset, 'op_future')
           else:
             add_volume(folder, volume, volume['name'], args.altitude_offset, 'op_active')
+
+      if op['gufi'] in telemetry_by_gufi:
+        add_track(folder, telemetry_by_gufi[op['gufi']], 'Telemetry ' + op['gufi'])
+
 
   if uvrs:
     uvrs_folder = add_folder(doc, 'UVRs')
