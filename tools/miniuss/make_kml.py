@@ -179,6 +179,11 @@ def main(argv):
   parser.add_argument('--telemetry', dest='telemetry', default='', metavar='CSV_FILENAME',
                       help='A telemetry CSV file containing columns GUFI,Timestamp,Latitude (degrees),Longitude '
                            '(degrees),Altitude (meters WGS84)')
+  parser.add_argument('--uss_with_telemetry', dest='uss_with_telemetry', default='', metavar='USS_NAMES',
+                      help='Comma-separated list of USSs that have telemetry')
+  parser.add_argument('--include_unflown_flights', dest='include_unflown_flights', action='store_true', default=False,
+                      help='If specified, include flights from USSs with telemetry in general even when those specific '
+                           'flights do not have telemetry')
   args = parser.parse_args()
 
   volumes_after = formatting.parse_timestamp(args.volumes_after) if args.volumes_after else T_MIN
@@ -187,12 +192,14 @@ def main(argv):
   submitted_before = formatting.parse_timestamp(args.submitted_before) if args.submitted_before else T_MAX
   updated_after = formatting.parse_timestamp(args.updated_after) if args.updated_after else T_MIN
   updated_before = formatting.parse_timestamp(args.updated_before) if args.updated_before else T_MAX
+  uss_with_telemetry = set(args.uss_with_telemetry.split(','))
+  include_unflown_flights = args.include_unflown_flights
 
   # Read operation and grid updates
   op_updates = {}
   grid_updates = []
   for pattern in args.updates:
-    for filename in glob.glob(pattern):
+    for filename in sorted(glob.glob(pattern)):
       with open(filename) as f:
         update = json.loads(f.read())
 
@@ -210,6 +217,7 @@ def main(argv):
         start_time = min(vol['effective_time_begin'] for vol in op['operation_volumes'])
         end_time = max(vol['effective_time_end'] for vol in op['operation_volumes'])
         op['start_time'] = start_time
+        op['end_time'] = end_time
         if (end_time < volumes_after or start_time > volumes_before or
           op['submit_time'] < submitted_after or op['submit_time'] > submitted_before or
           op['update_time'] < updated_after or op['update_time'] > updated_before):
@@ -352,12 +360,19 @@ def main(argv):
 
     first_seen = op_grid_timebounds[op['gufi']].first_seen
     disappeared = op_grid_timebounds[op['gufi']].disappeared
+    if op['start_time'] < first_seen:
+      op['start_time'] = first_seen
+    if op['end_time'] > disappeared:
+      op['end_time'] = disappeared
     for vol in op['operation_volumes']:
       if vol['effective_time_begin'] < first_seen:
         vol['effective_time_begin'] = first_seen
       if vol['effective_time_end'] > disappeared:
         vol['effective_time_end'] = disappeared
     op['submit_time'] = first_seen
+
+  # Delete any operations outside desired bounds
+  ops = [op for op in ops if op['start_time'] < volumes_before and op['end_time'] > volumes_after]
 
   # Construct KML
   name = datetime.datetime.strftime(max(op['update_time'] for op in ops), '%Y%m%d_%H%M%S')
@@ -366,6 +381,8 @@ def main(argv):
   add_name(doc, name)
   add_style(doc, 'op_active', line_color='#ff37d7fb', line_width=2.0, poly_color='#7d37d7fb')
   add_style(doc, 'op_future', line_color='#ff864d2b', line_width=1.0, poly_color='#00000000')
+  add_style(doc, 'unflown_op_active', line_color='#306b1b7d', line_width=2.0, poly_color='#306b1b7d')
+  add_style(doc, 'unflown_op_future', line_color='#306b1b7d', line_width=1.0, poly_color='#00000000')
   add_style(doc, 'uvr_active', line_color='#ff0000ff', line_width=2.0, poly_color='#800000ff')
   add_style(doc, 'uvr_future', line_color='#ff0040a0', line_width=1.0, poly_color='#300040a0')
   if telemetry_by_gufi:
@@ -375,17 +392,22 @@ def main(argv):
   if ops:
     ops_folder = add_folder(doc, 'Operations')
     for op in sorted(ops, key=lambda op_item: op_item['submit_time']):
-      if telemetry_by_gufi and op['uss_name'] == 'wing' and op['gufi'] not in telemetry_by_gufi:
-        continue  # Do not display unflown Wing flights
+      if telemetry_by_gufi and op['uss_name'] in uss_with_telemetry and op['gufi'] not in telemetry_by_gufi:
+        if not include_unflown_flights:
+          continue
+        style_prefix = 'unflown_'
+      else:
+        style_prefix = ''
 
       time_name = datetime.datetime.strftime(op['submit_time'], '%H:%M:%S')
       folder = add_folder(ops_folder, '%s %s %s' % (time_name, op['uss_name'], op['gufi']))
       for volume in op['operation_volumes']:
         if volume['effective_time_end'] >= volume['effective_time_begin']:
           if volume['future']:
-            add_volume(folder, volume, 'Future ' + str(volume['name']), args.altitude_offset, 'op_future')
+            add_volume(folder, volume, 'Future ' + str(volume['name']), args.altitude_offset,
+                       style_prefix + 'op_future')
           else:
-            add_volume(folder, volume, volume['name'], args.altitude_offset, 'op_active')
+            add_volume(folder, volume, volume['name'], args.altitude_offset, style_prefix + 'op_active')
 
       if op['gufi'] in telemetry_by_gufi:
         add_track(folder, telemetry_by_gufi[op['gufi']], 'Telemetry ' + op['gufi'])
