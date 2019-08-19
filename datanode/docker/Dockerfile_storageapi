@@ -15,7 +15,7 @@
 # Definition for Docker image that runs the InterUSS Platform storage API server.
 
 # To build an image from this Dockerfile:
-# docker image build -f Dockerfile_storageapi -t interussplatform/storage_api:publicportal ../src
+# docker image build -f Dockerfile_storageapi -t interussplatform/storage_api:astm_stub ../src
 
 # To run this image:
 # docker run \
@@ -38,7 +38,7 @@ FROM python:2
 
 WORKDIR /usr/src/app
 
-RUN pip install --no-cache-dir python-dateutil kazoo flask PyJWT djangorestframework cryptography pytz gunicorn shapely
+RUN pip install --no-cache-dir python-dateutil kazoo flask PyJWT djangorestframework cryptography pytz gunicorn shapely s2sphere iso8601 requests
 
 COPY . .
 

@@ -19,18 +19,23 @@ import abc
 import json
 import logging
 import numbers
-import os
-import sys
 import flask
 import jwt
 import requests
 from rest_framework import status
 from shapely.geometry import Polygon
+import s2sphere
 
-import slippy_util
 
 logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.INFO)
 log = logging.getLogger('InterUSS_DataNode_Authorization')
+
+
+class AuthorizationError(RuntimeError):
+  def __init__(self, code, message):
+    self.code = code
+    self.message = message
+    super(AuthorizationError, self).__init__()
 
 
 def JoinZoom(zoom, tiles):
@@ -58,7 +63,7 @@ class Authorizer(object):
     self.test_id = testid
     log.info('Authorization set to test mode with test ID=%s' % self.test_id)
 
-  def ValidateAccessToken(self, headers, tiles=None):
+  def ValidateAccessToken(self, headers, cell_ids, required_scope):
     """Checks the access token, aborting if it does not pass.
 
     Uses one or more OAuth public keys to validate an access token.
@@ -75,55 +80,52 @@ class Authorizer(object):
     """
     uss_id = None
     if self.test_id:
-      if self.test_id in headers.get('access_token', ''):
-        return headers['access_token']
-      elif self.test_id in headers.get('Authorization', ''):
+      if self.test_id in headers.get('Authorization', ''):
         return headers['Authorization']
-      elif 'access_token' not in headers and 'Authorization' not in headers:
+      elif 'Authorization' not in headers:
         return self.test_id
 
     # TODO(hikevin): Replace with OAuth Discovery and JKWS
-    token = None
-    if 'Authorization' in headers:
-      token = headers['Authorization'].replace('Bearer ', '')
-    elif 'access_token' in headers:
-      token = headers['access_token']
+    token = headers.get('Authorization', '').replace('Bearer ', '')
     if not token:
-      log.error('Attempt to access resource without access_token in header.')
-      flask.abort(status.HTTP_403_FORBIDDEN,
-                  'Valid OAuth access_token must be provided in header.')
+      log.error('Attempt to access resource without Bearer token in Authorization header.')
+      raise AuthorizationError(status.HTTP_403_FORBIDDEN,
+                  'Valid JWT access token must be provided in Authorization header.')
 
     # Verify validity of claims without checking signature
     try:
       r = jwt.decode(token, algorithms='RS256', verify=False)
-      #TODO(hikevin): Check scope is valid for InterUSS Platform
       uss_id = r['client_id'] if 'client_id' in r else r.get('sub', None)
+      if required_scope not in r.get('scope', ''):
+        raise AuthorizationError(status.HTTP_403_FORBIDDEN,
+                    'Access token missing required scope %s; found %s' %
+                    (required_scope, r.get('scope', '<no scope claim>')))
     except jwt.ImmatureSignatureError:
       log.error('Access token is immature.')
-      flask.abort(status.HTTP_401_UNAUTHORIZED,
+      raise AuthorizationError(status.HTTP_401_UNAUTHORIZED,
                   'OAuth access_token is invalid: token is immature.')
     except jwt.ExpiredSignatureError:
       log.error('Access token has expired.')
-      flask.abort(status.HTTP_401_UNAUTHORIZED,
+      raise AuthorizationError(status.HTTP_401_UNAUTHORIZED,
                   'OAuth access_token is invalid: token has expired.')
     except jwt.DecodeError:
       log.error('Access token is invalid and cannot be decoded.')
-      flask.abort(status.HTTP_400_BAD_REQUEST,
+      raise AuthorizationError(status.HTTP_400_BAD_REQUEST,
                   'OAuth access_token is invalid: token cannot be decoded.')
     except jwt.InvalidTokenError as e:
       log.error('Unexpected InvalidTokenError: %s', str(e))
-      flask.abort(status.HTTP_500_INTERNAL_SERVER_ERROR,
+      raise AuthorizationError(status.HTTP_500_INTERNAL_SERVER_ERROR,
                   'Unexpected token error: ' + str(e))
     issuer = r.get('iss', None)
 
-    if tiles:
-      # Check only authorities that manage all specified tiles
+    if cell_ids:
+      # Check only authorities that manage all specified cells
       authorities = set.intersection(
-          *[self._GetAuthorities(issuer, tile) for tile in tiles])
+          *[self._GetAuthorities(issuer, cell_id) for cell_id in cell_ids])
     else:
       authorities = self._GetAuthorities(issuer, None)
     if not authorities:
-      flask.abort(status.HTTP_401_UNAUTHORIZED,
+      raise AuthorizationError(status.HTTP_401_UNAUTHORIZED,
                   'No authorization authorities could be found')
 
     # Check signature against all possible public keys
@@ -137,40 +139,44 @@ class Authorizer(object):
         # Access token signature not valid for this public key, but might be
         # valid for a different public key.
         pass
+      except jwt.ExpiredSignatureError:
+        log.error('Access token has expired.')
+        raise AuthorizationError(status.HTTP_401_UNAUTHORIZED,
+                    'OAuth access_token is invalid: token has expired.')
     if not valid:
       # Check against all authorities
       for authority in self.authorities:
         try:
           jwt.decode(token, authority.public_key, algorithms='RS256')
           invalid_tile = None
-          if tiles:
-            for tile in tiles:
-              if not authority.is_applicable(issuer, tile):
-                invalid_tile = tile
+          if cell_ids:
+            for cell_id in cell_ids:
+              if not authority.is_applicable(issuer, cell_id):
+                invalid_tile = cell_id
                 break
           if invalid_tile:
-            flask.abort(
+            raise AuthorizationError(
                 status.HTTP_401_UNAUTHORIZED,
                 'Access token has valid signature but %s is not applicable to '
                 'tile %s' % (authority.name, str(invalid_tile)))
           else:
-            flask.abort(status.HTTP_401_UNAUTHORIZED,
+            raise AuthorizationError(status.HTTP_401_UNAUTHORIZED,
                         'Access token has valid signature but does not match '
                         'server\'s authority configuration')
         except jwt.InvalidSignatureError:
           # Token signature isn't valid for this authority
           pass
-      flask.abort(status.HTTP_401_UNAUTHORIZED,
+      raise AuthorizationError(status.HTTP_401_UNAUTHORIZED,
                   'Access token signature is invalid')
 
     return uss_id
 
-  def _GetAuthorities(self, issuer, tile):
+  def _GetAuthorities(self, issuer, cell_id):
     """Retrieve set of applicable AuthorizationAuthorities."""
-    cache_key = (issuer, tile)
+    cache_key = (issuer, cell_id)
     if cache_key not in self._cache:
       self._cache[cache_key] = set(a for a in self.authorities
-                                   if a.is_applicable(issuer, tile))
+                                   if a.is_applicable(issuer, cell_id))
     return self._cache[cache_key]
 
 
@@ -178,6 +184,8 @@ class _AuthorizationAuthority(object):
   """Authority that grants access tokens to access part of this data node."""
 
   def __init__(self, public_key, name):
+    public_key = parse_string_source(public_key)
+
     # ENV variables sometimes don't pass newlines, spec says white space
     # doesn't matter, but pyjwt cares about it, so fix it
     public_key = public_key.replace(' PUBLIC ', '_PLACEHOLDER_')
@@ -208,16 +216,16 @@ class _AuthorizationConstraint(object):
   __metaclass__ = abc.ABCMeta
 
   @abc.abstractmethod
-  def is_applicable(self, issuer, tile):
-    """Determine whether an AuthorizationAuthority is applicable for tile.
+  def is_applicable(self, issuer, cell_id):
+    """Determine whether an AuthorizationAuthority is applicable for an S2 cell.
 
     Args:
       issuer: Content of access token's `iss` JWT field.
-      tile: Slippy (zoom, x, y) for tile of interest.
+      cell_id: Integer S2 cell of interest.
 
     Returns:
       True if the associated AuthorizationAuthority is applicable for the
-      specified tile.
+      specified cell.
     """
     raise NotImplementedError('Abstract method is_applicable not implemented')
 
@@ -228,7 +236,7 @@ class _IssuerConstraint(_AuthorizationConstraint):
   def __init__(self, issuer):
     self._issuer = issuer
 
-  def is_applicable(self, issuer, tile):
+  def is_applicable(self, issuer, cell_id):
     # Overrides method in parent class.
     return issuer == self._issuer
 
@@ -239,70 +247,45 @@ class _AreaConstraint(_AuthorizationConstraint):
   def __init__(self, points, inside):
     self._polygon = Polygon(points)
     self._inside = inside
+    raise NotImplementedError('AreaConstraints not yet supported')
 
-  def is_applicable(self, issuer, tile):
+  def is_applicable(self, issuer, cell_id):
     # Overrides method in parent class.
-    if not tile:
+    if not cell_id:
       return True
-    tile_polygon = Polygon(slippy_util.convert_tile_to_polygon(*tile))
-    if self._inside:
-      return self._polygon.intersects(tile_polygon)
-    else:
-      return not tile_polygon.within(self._polygon)
+    raise NotImplementedError('AreaConstraints not yet supported')
 
 
 class _RangeConstraint(_AuthorizationConstraint):
-  """Tiles must lie inside one or more explicit Slippy tile ranges."""
+  """Cells must lie inside one of an explicit list of cells."""
 
-  def __init__(self, tile_ranges, inclusive):
-    self._tile_ranges = []
-    for tile_range in tile_ranges:
-      z_range, x_range, y_range = tile_range
-      z_min, z_max = _GetRangeBounds(z_range)
-      x_min, x_max = _GetRangeBounds(x_range)
-      y_min, y_max = _GetRangeBounds(y_range)
-      self._tile_ranges.append((z_min, z_max, x_min, x_max, y_min, y_max))
+  def __init__(self, cell_ids, inclusive):
+    self._cells = s2sphere.CellUnion([_GetCellId(cell_id) for cell_id in cell_ids])
     self._inclusive = inclusive
 
-  def is_applicable(self, issuer, tile):
+  def is_applicable(self, issuer, cell_id):
     # Overrides method in parent class.
-    if not tile:
+    if not cell_id:
       return True
-    zoom, x, y = tile
-    in_range = False
-    for tile_range in self._tile_ranges:
-      z_min, z_max, x_min, x_max, y_min, y_max = tile_range
-      if ((z_min <= zoom <= z_max) and
-          (x_min <= x <= x_max) and
-          (y_min <= y <= y_max)):
-        in_range = True
-        break
-    return in_range == self._inclusive
+    intersects = s2sphere.CellUnion([cell_id]).intersects(self._cells)
+    return intersects if self._inclusive else not intersects
 
 
-def _GetRangeBounds(range_spec):
-  """Convert a JSON range spec into min and max bounds of that range.
+def _GetCellId(cell_id):
+  """Convert a JSON cell ID into an S2 cell.
 
   Args:
-    range_spec: Decoded JSON structure describing range.
-      Number: Value must match specified value exactly.
-      "*": Any value accepted.
-      "XXX:YYY": Any value accepted between XXX and YYY, inclusive.
+    cell_id: Decoded JSON structure describing cell.
+      Number: Decimal S2 cell ID
+      String: Hexadecimal S2 cell ID
 
   Returns:
-    min_bound: Minimum inclusive bound of range.
-    max_bound: Maximum inclusive bound of range.
+    S2 cell for cell_id.
   """
-  if isinstance(range_spec, numbers.Number):
-    return range_spec, range_spec
-  elif isinstance(range_spec, basestring):
-    if range_spec == '*':
-      return float('-inf'), float('inf')
-    elif ':' in range_spec:
-      bounds = range_spec.split(':')
-      if len(bounds) != 2:
-        raise ValueError('Too many bounds in range_spec')
-      return int(bounds[0]), int(bounds[1])
+  if isinstance(cell_id, numbers.Number):
+    return s2sphere.CellId(cell_id)
+  elif isinstance(cell_id, basestring):
+    return s2sphere.CellId(int(cell_id + ''.join('0' for _ in range(16 - len(cell_id))), 16))
   raise ValueError('Invalid range_spec')
 
 
@@ -329,13 +312,7 @@ def _ParseAuthorities(config_string):
   Returns:
     List of AuthorizationAuthorities described in provided config.
   """
-  if config_string.startswith('file://'):
-    with open(config_string[len('file://'):], 'r') as f:
-      config_string = f.read()
-  if (config_string.startswith('http://') or
-      config_string.startswith('https://')):
-    req = requests.get(config_string)
-    config_string = req.content
+  config_string = parse_string_source(config_string)
 
   authority_specs = json.loads(config_string)
   authorities = []
@@ -352,10 +329,21 @@ def _ParseAuthorities(config_string):
             constraint_spec['outline'], constraint_spec.get('inside', True))
         elif constraint_spec['type'] == 'range':
           constraint = _RangeConstraint(
-            constraint_spec['tiles'], constraint_spec.get('inclusive', True))
+            constraint_spec['cell_ids'], constraint_spec.get('inclusive', True))
         else:
           raise ValueError('Invalid constraint type: ' +
                            constraint_spec.get('type', '<not specified>'))
         authority.constraints.append(constraint)
     authorities.append(authority)
   return authorities
+
+
+def parse_string_source(s):
+  if s.startswith('file://'):
+    with open(s[len('file://'):], 'r') as f:
+      s = f.read()
+  if (s.startswith('http://') or
+    s.startswith('https://')):
+    req = requests.get(s)
+    s = req.content
+  return s

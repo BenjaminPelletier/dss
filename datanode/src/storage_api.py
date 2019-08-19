@@ -32,11 +32,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 # logging is our log infrastructure used for this application
+import collections
+import datetime
 import logging
 # OptionParser is our command line parser interface
 from optparse import OptionParser
 import os
 import sys
+import threading
+
 # Flask is our web services infrastructure
 from flask import abort
 from flask import Flask
@@ -44,13 +48,12 @@ from flask import jsonify
 from flask import request
 # rest_framework is for HTTP status codes
 from rest_framework import status
+import iso8601
+import pytz
+import s2sphere
 
 # Tools for checking client authorization
 import authorization
-# Our main class for accessing metadata from the locking system
-import storage_interface
-# Tools for slippy conversion
-import slippy_util
 
 # Initialize everything we need
 # VERSION = '0.1.0'  # Initial TCL3 release
@@ -75,13 +78,197 @@ import slippy_util
 # VERSION = '1.1.0.005'  # api changes to support multi-grid GET/PUT/DEL
 # VERSION = 'PublicPortal1.1.1.006'  # Added public portal support
 # VERSION = 'PublicPortal1.1.1.007'  # Fixed multi-cell bug
-VERSION = 'PublicPortal1.1.2.008'  # Added per-area auth
+# VERSION = 'PublicPortal1.1.2.008'  # Added per-area auth
+VERSION = 'ASTMStub2.0.0.009'  # Switched to ASTM format without data sync backing
 
 logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.INFO)
 log = logging.getLogger('InterUSS_DataNode_StorageAPI')
-wrapper = None  # Global object API uses for access
 webapp = Flask(__name__)  # Global object serving the API
 auth = None  # Global object providing authorization
+
+
+EntityReference = collections.namedtuple('EntityReference', ('id', 'data', 'cell_ids', 'time_start', 'time_end'))
+
+class EntityCollection(object):
+  def __init__(self):
+    self._ids_by_cell_id = collections.defaultdict(set)
+    self._entities_by_id = {}
+
+  def list_from_cells(self, cell_ids, earliest_time=None, latest_time=None):
+    entity_ids = set()
+    for cell_id in cell_ids:
+      cell_id_str = str(cell_id)
+      if cell_id_str not in self._ids_by_cell_id:
+        continue
+      entity_ids = entity_ids.union(self._ids_by_cell_id[cell_id_str])
+
+    result = []
+    now = datetime.datetime.utcnow().replace(tzinfo=pytz.utc)
+    for entity_id in entity_ids:
+      entity = self._entities_by_id[entity_id]
+      if entity.time_end and now > entity.time_end:
+        # This Entity has expired; remove it automatically
+        self.remove(entity_id)
+        continue
+      if latest_time and entity.time_start > latest_time:
+        continue
+      if earliest_time and entity.time_end < earliest_time:
+        continue
+      result.append(entity)
+    return result
+
+  def upsert(self, entity_ref):
+    existed_previously = self.remove(entity_ref.id)
+    self._entities_by_id[entity_ref.id] = entity_ref
+    for cell_id in entity_ref.cell_ids:
+      self._ids_by_cell_id[str(cell_id)].add(entity_ref.id)
+    return not existed_previously
+
+  def remove(self, entity_id):
+    if entity_id not in self._entities_by_id:
+      return False
+    entity = self._entities_by_id.pop(entity_id)
+    for cell_id in entity.cell_ids:
+      cell_id_str = str(cell_id)
+      self._ids_by_cell_id[cell_id_str].remove(entity.id)
+      if not self._ids_by_cell_id[cell_id_str]:
+        del self._ids_by_cell_id[cell_id_str]
+    return True
+
+  def get(self, entity_id):
+    return self._entities_by_id.get(entity_id, None)
+
+
+class PseudoDatabase(object):
+  def __init__(self):
+    self.lock = threading.Lock()
+    self.identification_service_areas = EntityCollection()
+    self.subscriptions = EntityCollection()
+
+db = PseudoDatabase()
+
+
+def s2_cells_from_polygon(lats, lngs):
+  a = s2sphere.LatLng.from_degrees(min(lats), min(lngs))
+  b = s2sphere.LatLng.from_degrees(max(lats), max(lngs))
+  rect = s2sphere.LatLngRect.from_point_pair(a, b) #TODO: Use true polygon from Google S2 library
+  r = s2sphere.RegionCoverer()
+  r.min_level = 13
+  r.max_level = 13
+  r.max_cells = 1000
+  cell_ids = r.get_covering(rect)
+  return cell_ids
+
+
+def parse_geo_polygon_string(geo_polygon_string):
+  if geo_polygon_string is None:
+    raise ValueError('GeoPolygonString is missing')
+  coords = geo_polygon_string.split(',')
+  if len(coords) % 2 > 0:
+    raise ValueError('GeoPolygonString must contain an even number of values; found %d' % len(coords))
+  lats = [float(coords[i]) for i in range(0, len(coords), 2)]
+  lngs = [float(coords[i]) for i in range(1, len(coords), 2)]
+  if len(lats) < 3:
+    raise ValueError('GeoPolygonString must contain at least 3 points; only found %d' % len(lats))
+  return s2_cells_from_polygon(lats, lngs)
+
+
+def isa_to_json(entity_ref):
+  return {
+    'flights_url': entity_ref.data['flights_url'],
+    'owner': entity_ref.data['owner'],
+    'time_start': entity_ref.time_start.isoformat(),
+    'time_end': entity_ref.time_end.isoformat()
+  }
+
+
+def subscription_to_json(entity_ref):
+  return {
+    'id': entity_ref.id,
+    'callbacks': entity_ref.data['callbacks'],
+    'owner': entity_ref.data['owner'],
+    'notification_index': entity_ref.data['notification_index'],
+    'expires': entity_ref.time_end.isoformat(),
+    'begins': entity_ref.time_start.isoformat()
+  }
+
+
+def get_affected_subscribers(entity_ref):
+  affected_subscriptions = db.subscriptions.list_from_cells(
+    entity_ref.cell_ids, entity_ref.time_start, entity_ref.time_end)
+
+  for subscription in affected_subscriptions:
+    data = subscription.data
+    data['notification_index'] += 1
+    subscription = EntityReference(
+      subscription.id, data, subscription.cell_ids, subscription.time_start, subscription.time_end)
+    db.subscriptions.upsert(subscription)
+
+  subscribers_by_url = collections.defaultdict(list)
+  for subscription in affected_subscriptions:
+    url = subscription.data.get('callbacks', {}).get('identification_service_area_url', None)
+    if not url:
+      continue
+    subscribers_by_url[url].append({
+      'subscription': subscription.id,
+      'notification_index': subscription.data['notification_index']
+    })
+  return [{'url': url, 'subscriptions': states} for url, states in subscribers_by_url.items()]
+
+
+def cell_id_str(cell_id):
+  s = str(cell_id)[len('CellId: '):]
+  while s[-1] == '0':
+    s = s[0:-1]
+  return s
+
+
+def error_response(code, message):
+  return jsonify({'message': message}), code
+
+
+class ParseError(RuntimeError):
+  def __init__(self, code, message):
+    self.code = code
+    self.message = message
+    super(ParseError, self).__init__()
+
+
+def parse_extents(request_body):
+  now = datetime.datetime.utcnow().replace(tzinfo=pytz.utc)
+
+  if 'extents' not in request_body:
+    raise ParseError(status.HTTP_400_BAD_REQUEST, 'Missing extents parameter in request body')
+  extents = request_body['extents']
+  
+  if 'time_start' not in extents:
+    raise ParseError(status.HTTP_400_BAD_REQUEST, 'Missing time_start in extents')
+  try:
+    time_start = iso8601.parse_date(extents['time_start'])
+  except iso8601.ParseError as e:
+    raise ParseError(status.HTTP_400_BAD_REQUEST, 'Could not parse extents.time_start: ' + str(e))
+  if time_start < now:
+    time_start = now
+  
+  if 'time_end' not in extents:
+    raise ParseError(status.HTTP_400_BAD_REQUEST, 'Missing time_end in extents')
+  try:
+    time_end = iso8601.parse_date(extents['time_end'])
+  except iso8601.ParseError as e:
+    raise ParseError(status.HTTP_400_BAD_REQUEST, 'Could not parse extents.time_end: ' + str(e))
+  if time_end < now:
+    raise ParseError(status.HTTP_400_BAD_REQUEST, 'Attempted to create Identification Service Area wholly in the past')
+  
+  if 'spatial_volume' not in extents:
+    raise ParseError(status.HTTP_400_BAD_REQUEST, 'Missing spatial_volume in extents')
+  if 'footprint' not in extents['spatial_volume']:
+    raise ParseError(status.HTTP_400_BAD_REQUEST, 'Missing footprint in extents.spatial_volume')
+  if 'vertices' not in extents['spatial_volume']['footprint']:
+    raise ParseError(status.HTTP_400_BAD_REQUEST, 'Missing vertices in extents.spatial_volume.footprint')
+  vertices = extents['spatial_volume']['footprint']['vertices']
+  cell_ids = s2_cells_from_polygon(*zip(*[(vertex['lat'], vertex['lng']) for vertex in vertices]))
+  
+  return time_start, time_end, cell_ids
 
 
 ######################################################################
@@ -93,504 +280,225 @@ auth = None  # Global object providing authorization
 def Status():
   # just a quick status checker, not really a health check
   log.debug('Status handler instantiated...')
-  return _FormatResult({'status': 'success',
-                        'message': 'OK',
-                        'version': VERSION})
+  return jsonify({'status': 'success',
+                  'message': 'OK',
+                  'version': VERSION})
 
 
-@webapp.route('/introspect', methods=['GET'])
-def Introspect():
-  #  status checker of FIMS authorization token (access_token)
-  log.debug('Status handler instantiated...')
-  uss_id = auth.ValidateAccessToken()
-  return _FormatResult({
-      'status': 'success',
-      'message': 'ACCESS TOKEN VALID',
-      'data': {
-          'uss_id': uss_id
-      }
-  })
-
-
-@webapp.route('/introspect/<zoom>/<x>/<y>', methods=['GET'])
-def IntrospectTile(zoom, x, y):
-  """Status checker of FIMS authorization token (access_token).
-  Args:
-    zoom: zoom level to use for encapsulating the tile
-    x: x tile number in slippy tile format
-    y: y tile number in slippy tile format
-  """
-  log.debug('Status handler instantiated...')
+@webapp.route('/dss/identification_service_areas', methods=['GET'])
+def GetIdentificationServiceAreasHandler():
+  earliest_time_string = request.args.get('earliest_time', None)
+  if not earliest_time_string:
+    return error_response(status.HTTP_400_BAD_REQUEST, 'Missing earliest_time parameter')
   try:
-    zoom = int(zoom)
-    tiles = ((int(x), int(y)), )
+    earliest_time = iso8601.parse_date(earliest_time_string)
+  except iso8601.ParseError as e:
+    return error_response(status.HTTP_400_BAD_REQUEST, 'Could not parse earliest_time: ' + str(e))
+
+  latest_time_string = request.args.get('latest_time', None)
+  if not latest_time_string:
+    return error_response(status.HTTP_400_BAD_REQUEST, 'Missing latest_time parameter')
+  try:
+    latest_time = iso8601.parse_date(latest_time_string)
+  except iso8601.ParseError as e:
+    return error_response(status.HTTP_400_BAD_REQUEST, 'Could not parse latest_time: ' + str(e))
+
+  try:
+    cell_ids = parse_geo_polygon_string(request.args.get('area', None))
   except ValueError as e:
-    abort(status.HTTP_400_BAD_REQUEST, e.message)
-  uss_id = auth.ValidateAccessToken(authorization.JoinZoom(zoom, tiles))
-  return _FormatResult({
-    'status': 'success',
-    'message': 'ACCESS TOKEN VALID',
-    'data': {
-      'uss_id': uss_id
-    }
-  })
+    return error_response(status.HTTP_400_BAD_REQUEST, 'Invalid area parameter: ' + str(e))
 
-
-@webapp.route('/introspect/<zoom>', methods=['GET'])
-def IntrospectTiles(zoom):
-  """Status checker of FIMS authorization token (access_token).
-  Args:
-    zoom: zoom level to use for encapsulating the tiles
-    Plus posted webargs
-     coords: csv of lon,lat,long,lat,etc.
-     coord_type: (optional) type of coords - point (default), path, polygon
-  """
-  log.debug('Status handler instantiated...')
   try:
-    zoom = int(zoom)
-    tiles = _ConvertRequestToTiles(zoom)
-  except (ValueError, TypeError, OverflowError) as e:
-    abort(status.HTTP_400_BAD_REQUEST, e.message)
-  uss_id = auth.ValidateAccessToken(authorization.JoinZoom(zoom, tiles))
-  return _FormatResult({
-    'status': 'success',
-    'message': 'ACCESS TOKEN VALID',
-    'data': {
-      'uss_id': uss_id
-    }
-  })
+    uss_id = auth.ValidateAccessToken(request.headers, cell_ids, 'dss.read.identification_service_areas')
+  except authorization.AuthorizationError as e:
+    return error_response(e.code, e.message)
+
+  with db.lock:
+    isas = db.identification_service_areas.list_from_cells(cell_ids, earliest_time, latest_time)
+
+  response_body = {
+    'service_areas': [isa_to_json(isa) for isa in isas],
+    'debug': {'cell_ids': [cell_id_str(cell_id) for cell_id in cell_ids],
+              'uss_id': uss_id}
+  }
+
+  return jsonify(response_body)
 
 
-@webapp.route('/slippy/<zoom>', methods=['GET'])
-def ConvertCoordinatesToSlippy(zoom):
-  """Converts an CSV of coords to slippy tile format at the specified zoom.
-  Args:
-    zoom: zoom level to use for encapsulating the tiles
-    Plus posted webargs
-     coords: csv of lon,lat,long,lat,etc.
-     coord_type: (optional) type of coords - point (default), path, polygon
-  Returns:
-    200 with tiles array in JSON format,
-    or the nominal 4xx error codes as necessary.
-  """
-  log.info('Convert coordinates to slippy instantiated for %sz...', zoom)
+@webapp.route('/dss/identification_service_areas/<id>', methods=['PUT'])
+def PutIdentificationServiceAreasHandler(id):
+  request_body = request.json
+
   try:
-    zoom = int(zoom)
-    tiles = _ConvertRequestToTiles(zoom)
-    result = []
-    for x, y in tiles:
-      link = 'http://tile.openstreetmap.org/%d/%d/%d.png' % (zoom, x, y)
-      tile = {'link': link, 'zoom': zoom, 'x': x, 'y': y}
-      if tile not in result:
-        result.append(tile)
-  except (ValueError, TypeError, OverflowError) as e:
-    log.error('/slippy error: %s...', e.message)
-    abort(status.HTTP_400_BAD_REQUEST, e.message)
+    time_start, time_end, cell_ids = parse_extents(request_body)
+  except ParseError as e:
+    return error_response(e.code, e.message)
 
-  return jsonify({
-    'status': 'success',
-    'data': {
-      'zoom': zoom,
-      'grid_cells': result,
-    }
-  })
+  if 'flights_url' not in request_body:
+    return error_response(status.HTTP_400_BAD_REQUEST, 'Missing flights_url in request body')
+  flights_url = request_body['flights_url']
 
-
-@webapp.route(
-    '/GridCellMetaData/<zoom>/<x>/<y>',
-    methods=['GET', 'PUT', 'POST', 'DELETE'])
-def GridCellMetaDataHandler(zoom, x, y):
-  """Handles the web service request and routes to the proper function.
-
-  Args:
-    zoom: zoom level in slippy tile format
-    x: x tile number in slippy tile format
-    y: y tile number in slippy tile format
-    OAuth access_token as part of the header
-    Plus posted webargs as needed for PUT/POST and DELETE methods
-      (see internal functions Get/Put/Delete metadata below)
-  Returns:
-    200 with token and metadata in JSON format,
-    or the nominal 4xx error codes as necessary.
-  """
-  result = {}
   try:
-    zoom = int(zoom)
-    x = int(x)
-    y = int(y)
-  except ValueError:
-    abort(status.HTTP_400_BAD_REQUEST,
-          'Invalid parameters for slippy tile coordinates, must be integers.')
-  uss_id = auth.ValidateAccessToken(((zoom, x, y),))
-  if request.method == 'GET':
-    result = _GetGridCellMetaData(zoom, x, y)
-  elif request.method in ('PUT', 'POST'):
-    result = _PutGridCellMetaData(zoom, x, y, uss_id)
-  elif request.method == 'DELETE':
-    result = _DeleteGridCellMetaData(zoom, x, y, uss_id)
-  else:
-    abort(status.HTTP_405_METHOD_NOT_ALLOWED, 'Request method not supported.')
-  return _FormatResult(result)
+    uss_id = auth.ValidateAccessToken(request.headers, cell_ids, 'dss.write.identification_service_areas')
+  except authorization.AuthorizationError as e:
+    return error_response(e.code, e.message)
+
+  data = {
+    'owner': uss_id,
+    'flights_url': flights_url
+  }
+
+  entity_ref = EntityReference(id, data, cell_ids, time_start, time_end)
+
+  with db.lock:
+    isa_is_new = db.identification_service_areas.upsert(entity_ref)
+    subscribers = get_affected_subscribers(entity_ref)
+
+  response_body = {
+    'subscribers': subscribers,
+    'service_area': isa_to_json(entity_ref),
+    'debug': {'cell_ids': [cell_id_str(cell_id) for cell_id in cell_ids],
+              'uss_id': uss_id}
+  }
+
+  code = status.HTTP_201_CREATED if isa_is_new else status.HTTP_200_OK
+  return jsonify(response_body), code
 
 
-@webapp.route(
-  '/GridCellsMetaData/<zoom>',
-  methods=['GET', 'PUT', 'POST', 'DELETE'])
-def GridCellsMetaDataHandler(zoom):
-  """Handles the web service request for multi-grid operations.
+@webapp.route('/dss/identification_service_areas/<id>', methods=['DELETE'])
+def DeleteIdentificationServiceAreasHandler(id):
+  with db.lock:
+    entity_ref = db.identification_service_areas.get(id)
+    cell_ids = entity_ref.cell_ids if entity_ref else None
+    try:
+      uss_id = auth.ValidateAccessToken(request.headers, cell_ids, 'dss.write.identification_service_areas')
+    except authorization.AuthorizationError as e:
+      return error_response(e.code, e.message)
+    if entity_ref is None:
+      return error_response(status.HTTP_404_NOT_FOUND, 'No Identification Service Area found with id ' + id)
+    db.identification_service_areas.remove(id)
+    subscribers = get_affected_subscribers(entity_ref)
 
-  Args:
-    zoom: zoom level in slippy tile format
-    OAuth access_token as part of the header
-    Plus posted webargs:
-      coords: csv of lon,lat,long,lat,etc.
-      coord_type: (optional) type of coords - point (default), path, polygon
-       and additional as needed for PUT/POST and DELETE methods
-       (see internal functions Get/Put/Delete metadata below)
+  response_body = {
+    'subscribers': subscribers,
+    'service_area': isa_to_json(entity_ref),
+    'debug': {'cell_ids': [cell_id_str(cell_id) for cell_id in cell_ids],
+              'uss_id': uss_id}
+  }
 
-  Returns:
-    200 with token and metadata in JSON format,
-    or the nominal 4xx error codes as necessary.
-  """
-  result = {}
+  return jsonify(response_body)
+
+
+@webapp.route('/dss/subscriptions', methods=['GET'])
+def GetSubscriptionsHandler():
   try:
-    zoom = int(zoom)
-    tiles = _ConvertRequestToTiles(zoom)
-    if len(tiles) > slippy_util.TILE_LIMIT:
-      raise OverflowError('Limit of %d tiles impacted exceeded (%d)'
-                          % (slippy_util.TILE_LIMIT, len(tiles)))
-  except (ValueError, TypeError) as e:
-    abort(status.HTTP_400_BAD_REQUEST, e.message)
-  except OverflowError as e:
-    abort(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, e.message)
-  uss_id = auth.ValidateAccessToken(authorization.JoinZoom(zoom, tiles))
-  if request.method == 'GET':
-    result = _GetGridCellsMetaData(zoom, tiles)
-  elif request.method in ('PUT', 'POST'):
-    result = _PutGridCellsMetaData(zoom, tiles, uss_id)
-  elif request.method == 'DELETE':
-    result = _DeleteGridCellsMetaData(zoom, tiles, uss_id)
-  else:
-    abort(status.HTTP_405_METHOD_NOT_ALLOWED, 'Request method not supported.')
-  return _FormatResult(result)
+    cell_ids = parse_geo_polygon_string(request.args.get('area', None))
+  except ValueError as e:
+    return error_response(status.HTTP_400_BAD_REQUEST, 'Invalid area parameter: ' + str(e))
+
+  try:
+    uss_id = auth.ValidateAccessToken(request.headers, cell_ids, 'dss.read.identification_service_areas')
+  except authorization.AuthorizationError as e:
+    return error_response(e.code, e.message)
+
+  with db.lock:
+    subscriptions = db.subscriptions.list_from_cells(cell_ids)
+
+  subscriptions = [subscription for subscription in subscriptions if subscription.data['owner'] == uss_id]
+
+  response_body = {
+    'subscriptions': [subscription_to_json(subscription) for subscription in subscriptions],
+    'debug': {'cell_ids': [cell_id_str(cell_id) for cell_id in cell_ids],
+              'uss_id': uss_id}
+  }
+
+  return jsonify(response_body)
 
 
-######################################################################
-################       INTERNAL FUNCTIONS    #########################
-######################################################################
+@webapp.route('/dss/subscriptions/<id>', methods=['GET'])
+def GetSubscriptionHandler(id):
+  with db.lock:
+    entity_ref = db.subscriptions.get(id)
+    cell_ids = entity_ref.cell_ids if entity_ref else None
+    try:
+      uss_id = auth.ValidateAccessToken(request.headers, cell_ids, 'dss.read.identification_service_areas')
+    except authorization.AuthorizationError as e:
+      return error_response(e.code, e.message)
+    if entity_ref is None:
+      return error_response(status.HTTP_404_NOT_FOUND, 'No Subscription found with id ' + id)
 
-def _GetGridCellMetaData(zoom, x, y):
-  """Provides an instantaneous snapshot of the metadata for a specific GridCell.
+  response_body = {
+    'subscriptions': [subscription_to_json(entity_ref)],
+    'debug': {'cell_ids': [cell_id_str(cell_id) for cell_id in cell_ids],
+              'uss_id': uss_id}
+  }
 
-  GridCellMetaData provides an instantaneous snapshot of the metadata stored
-  in a specific GridCell, along with a token to be used when updating.
-
-  Args:
-    zoom: zoom level in slippy tile format
-    x: x tile number in slippy tile format
-    y: y tile number in slippy tile format
-  Returns:
-    200 with token and JSON metadata,
-    or the nominal 4xx error codes as necessary.
-  """
-  log.info('Grid cell metadata request instantiated for %sz, %s,%s...', zoom, x,
-           y)
-  result = wrapper.get(zoom, x, y)
-  return result
+  return jsonify(response_body)
 
 
-def _PutGridCellMetaData(zoom, x, y, uss_id):
-  """Updates the metadata stored in a specific slippy GridCell.
+@webapp.route('/dss/subscriptions/<id>', methods=['PUT'])
+def PutSubscriptionHandler(id):
+  request_body = request.json
 
-    Updates the metadata stored in a specific GridCell using optimistic locking
-    behavior. Operation fails if the metadata has been updated since
-    GET GridCellMetadata was originally called (based on token).
+  try:
+    time_start, time_end, cell_ids = parse_extents(request_body)
+  except ParseError as e:
+    return error_response(e.code, e.message)
 
-  Args:
-    zoom: zoom level in slippy tile format
-    x: x tile number in slippy tile format
-    y: y tile number in slippy tile format
-    uss_id: the plain text identifier for the USS from OAuth
-  Plus posted webargs:
-    sync_token: the token retrieved in the original GET GridCellMetadata,
-    scope: The submitting USS scope for the web service endpoint (used for OAuth
-      access),
-    operation_endpoint: the submitting USS endpoint where all flights in this
-      cell can be retrieved from,
-    operation_format: The output format for the USS web service endpoint (i.e.
-      NASA, GUTMA),
-    minimum_operation_timestamp: the lower time bound of all of the USSs flights
-      in this grid cell.
-    maximum_operation_timestamp: the upper time bound of all of the USSs flights
-      in this grid cell.
+  if 'callbacks' not in request_body:
+    return error_response(status.HTTP_400_BAD_REQUEST, 'Missing callbacks in request body')
+  callbacks = request_body['callbacks']
+  if 'identification_service_area_url' not in callbacks:
+    return error_response(status.HTTP_400_BAD_REQUEST, 'Missing identification_service_area_url in callbacks')
 
-  Returns:
-    200 and a new token if updated successfully,
-    409 if there is a locking conflict that could not be resolved, or
-    the other nominal 4xx error codes as necessary.
-  """
-  log.info('Grid cell metadata submit instantiated for %sz, %s,%s...', zoom, x,
-           y)
-  sync_token = _GetRequestParameter('sync_token', None)
-  if not sync_token and 'sync_token' in request.headers:
-    sync_token = request.headers['sync_token']
-  scope = _GetRequestParameter('scope', None)
-  operation_endpoint = _GetRequestParameter('operation_endpoint', '')
-  operation_format = _GetRequestParameter('operation_format', '')
-  minimum_operation_timestamp = _GetRequestParameter(
-      'minimum_operation_timestamp', None)
-  maximum_operation_timestamp = _GetRequestParameter(
-      'maximum_operation_timestamp', None)
-  public_portal_endpoint = _GetRequestParameter('public_portal_endpoint', '')
-  flight_info_endpoint = _GetRequestParameter('flight_info_endpoint', '')
-  errorfield = errormsg = None
-  if operation_endpoint and not sync_token:
-    errorfield = 'sync_token'
-  elif not uss_id:
-    errorfield = 'uss_id'
-    errormsg = 'USS identifier not received from OAuth token check.'
-  elif not scope:
-    errorfield = 'scope'
-  elif operation_endpoint and not operation_format:
-    errorfield = 'operation_format'
-  elif not minimum_operation_timestamp:
-    errorfield = 'minimum_operation_timestamp'
-  elif not maximum_operation_timestamp:
-    errorfield = 'maximum_operation_timestamp'
-  elif (not operation_endpoint and
-        not public_portal_endpoint and
-        not flight_info_endpoint):
-    errorfield = ('operation_endpoint, public portal_endpoint, or '
-                  'flight_info_endpoint')
-  if errorfield:
-    if not errormsg:
-      errormsg = errorfield + (
-          ' must be provided in the form data request to add to a '
-          'GridCell.')
-    result = {
-        'status': 'error',
-        'code': status.HTTP_400_BAD_REQUEST,
-        'message': errormsg
-    }
-  else:
-    result = wrapper.set(zoom, x, y, sync_token, uss_id, scope,
-                         operation_format, operation_endpoint,
-                         minimum_operation_timestamp,
-                         maximum_operation_timestamp, public_portal_endpoint,
-                         flight_info_endpoint)
-  return result
+  try:
+    uss_id = auth.ValidateAccessToken(request.headers, cell_ids, 'dss.read.identification_service_areas')
+  except authorization.AuthorizationError as e:
+    return error_response(e.code, e.message)
+
+  data = {
+    'owner': uss_id,
+    'callbacks': callbacks,
+    'notification_index': 0
+  }
+
+  entity_ref = EntityReference(id, data, cell_ids, time_start, time_end)
+
+  with db.lock:
+    subscription_is_new = db.subscriptions.upsert(entity_ref)
+    isas = db.identification_service_areas.list_from_cells(cell_ids, time_start, time_end)
+
+  response_body = {
+    'service_areas': [isa_to_json(isa) for isa in isas],
+    'subscription': subscription_to_json(entity_ref),
+    'debug': {'cell_ids': [cell_id_str(cell_id) for cell_id in cell_ids],
+              'uss_id': uss_id}
+  }
+
+  code = status.HTTP_201_CREATED if subscription_is_new else status.HTTP_200_OK
+  return jsonify(response_body), code
 
 
-def _DeleteGridCellMetaData(zoom, x, y, uss_id):
-  """Removes the USS entry in the metadata stored in a specific GridCell.
+@webapp.route('/dss/subscriptions/<id>', methods=['DELETE'])
+def DeleteSubscriptionHandler(id):
+  with db.lock:
+    entity_ref = db.subscriptions.get(id)
+    cell_ids = entity_ref.cell_ids if entity_ref else None
+    try:
+      uss_id = auth.ValidateAccessToken(request.headers, cell_ids, 'dss.read.identification_service_areas')
+    except authorization.AuthorizationError as e:
+      return error_response(e.code, e.message)
+    if entity_ref is None:
+      return error_response(status.HTTP_404_NOT_FOUND, 'No Subscription found with id ' + id)
+    db.subscriptions.remove(id)
 
-  Removes the USS entry in the metadata using optimistic locking behavior.
+  response_body = {
+    'subscription': subscription_to_json(entity_ref),
+    'debug': {'cell_ids': [cell_id_str(cell_id) for cell_id in cell_ids],
+              'uss_id': uss_id}
+  }
 
-  Args:
-    zoom: zoom level in slippy tile format
-    x: x tile number in slippy tile format
-    y: y tile number in slippy tile format
-    uss_id: the plain text identifier for the USS from OAuth
-  Returns:
-    200 and a new sync_token if updated successfully,
-    409 if there is a locking conflict that could not be resolved, or
-    the other nominal 4xx error codes as necessary.
-  """
-  log.info('Grid cell metadata delete instantiated for %sz, %s,%s...', zoom, x,
-           y)
-  if uss_id:
-    result = wrapper.delete(zoom, x, y, uss_id)
-  else:
-    result = {
-        'status':
-            'fail',
-        'code':
-            status.HTTP_400_BAD_REQUEST,
-        'message':
-            """uss_id must be provided in the request to
-              delete a USS from a GridCell."""
-    }
-  return result
-
-
-def _GetGridCellsMetaData(zoom, tiles):
-  """Provides an instantaneous snapshot of the metadata for a multiple GridCells
-
-  Args:
-    zoom: zoom level in slippy tile format
-    tiles: array of x,y tiles to retrieve
-  Returns:
-    200 with token and JSON metadata,
-    or the nominal 4xx error codes as necessary.
-  """
-  log.info('Grid cells metadata request instantiated for %sz, %s...',
-           zoom, str(tiles))
-  result = wrapper.get_multi(zoom, tiles)
-  return result
-
-def _PutGridCellsMetaData(zoom, tiles, uss_id):
-  """Updates the metadata stored in multiple GridCells.
-
-    Updates the metadata stored in a multiple GridCell using optimistic locking
-    behavior. Operation fails if the metadata has been updated since
-    GET GridCellsMetadata was originally called (based on sync_token).
-
-  Args:
-    zoom: zoom level in slippy tile format
-    tiles: array of x,y tiles to retrieve
-    uss_id: the plain text identifier for the USS from OAuth
-  Plus posted webargs:
-    sync_token: the composite sync_token retrieved in the
-      original GET GridCellsMetadata,
-    scope: The submitting USS scope for the web service endpoint (used for OAuth
-      access),
-    operation_endpoint: the submitting USS endpoint where all flights in these
-      cells can be retrieved from (variables {zoom}, {x}, and {y} can be used in
-      the endpoint, and will be replaced with the actual grid values),
-    operation_format: The output format for the USS web service endpoint (i.e.
-      NASA, GUTMA),
-    minimum_operation_timestamp: the lower time bound of all of the USSs flights
-      in these grid cells.
-    maximum_operation_timestamp: the upper time bound of all of the USSs flights
-      in these grid cells.
-
-  Returns:
-    200 and a new composite token if updated successfully,
-    409 if there is a locking conflict that could not be resolved, or
-    the other nominal 4xx error codes as necessary.
-  """
-  log.info('Grid cells metadata submit instantiated for %s at %sz, %s...',
-           uss_id, zoom, str(tiles))
-  sync_token = _GetRequestParameter('sync_token', None)
-  if not sync_token and 'sync_token' in request.headers:
-    sync_token = request.headers['sync_token']
-  scope = _GetRequestParameter('scope', None)
-  operation_endpoint = _GetRequestParameter('operation_endpoint', '')
-  operation_format = _GetRequestParameter('operation_format', '')
-  minimum_operation_timestamp = _GetRequestParameter(
-    'minimum_operation_timestamp', None)
-  maximum_operation_timestamp = _GetRequestParameter(
-    'maximum_operation_timestamp', None)
-  public_portal_endpoint = _GetRequestParameter('public_portal_endpoint', '')
-  flight_info_endpoint = _GetRequestParameter('flight_info_endpoint', '')
-  errorfield = errormsg = None
-  if operation_endpoint and not sync_token:
-    errorfield = 'sync_token'
-  elif not uss_id:
-    errorfield = 'uss_id'
-    errormsg = 'USS identifier not received from OAuth token check.'
-  elif not scope:
-    errorfield = 'scope'
-  elif operation_endpoint and not operation_format:
-    errorfield = 'operation_format'
-  elif not minimum_operation_timestamp:
-    errorfield = 'minimum_operation_timestamp'
-  elif not maximum_operation_timestamp:
-    errorfield = 'maximum_operation_timestamp'
-  if errorfield:
-    if not errormsg:
-      errormsg = errorfield + (
-        ' must be provided in the form data request to add to a '
-        'GridCell.')
-    result = {
-      'status': 'error',
-      'code': status.HTTP_400_BAD_REQUEST,
-      'message': errormsg
-    }
-  else:
-    result = wrapper.set_multi(zoom, tiles, sync_token, uss_id, scope,
-                               operation_format, operation_endpoint,
-                               minimum_operation_timestamp,
-                               maximum_operation_timestamp,
-                               public_portal_endpoint,
-                               flight_info_endpoint)
-  return result
-
-def _DeleteGridCellsMetaData(zoom, tiles, uss_id):
-  """Removes the USS entry in multiple GridCells.
-
-  Args:
-    zoom: zoom level in slippy tile format
-    tiles: array of x,y tiles to delete the uss from
-    uss_id: the plain text identifier for the USS from OAuth
-  Returns:
-    200 and a new sync_token if updated successfully,
-    409 if there is a locking conflict that could not be resolved, or
-    the other nominal 4xx error codes as necessary.
-  """
-  log.info('Grid cells metadata delete instantiated for %s, %sz, %s...',
-           uss_id, zoom, str(tiles))
-  if uss_id:
-    result = wrapper.delete_multi(zoom, tiles, uss_id)
-  else:
-    result = {
-      'status':
-        'fail',
-      'code':
-        status.HTTP_400_BAD_REQUEST,
-      'message':
-        """uss_id must be provided in the request to
-          delete a USS from a GridCell."""
-    }
-  return result
-
-
-def _ConvertRequestToTiles(zoom):
-  """Converts an CSV of coords into slippy tile format at the specified zoom
-      and the specified coordinate type (path, polygon, point) """
-  tiles = []
-  coords = _GetRequestParameter('coords', '')
-  coord_type = _GetRequestParameter('coord_type', 'point').lower()
-  log.debug('Retrieved coords from web params and split to %s...', coords)
-  coordinates = slippy_util.convert_csv_to_coordinates(coords)
-  if not coordinates:
-    log.error('Invalid coords %s, must be a CSV of lat,lon...', coords)
-    raise ValueError('Invalid coords, must be a CSV of lat,lon,lat,lon...')
-  if coord_type == 'point':
-    for c in coordinates:
-      tiles.append((slippy_util.convert_point_to_tile(zoom, c[0], c[1])))
-  elif coord_type == 'path':
-    tiles = slippy_util.convert_path_to_tiles(zoom, coordinates)
-  elif coord_type == 'polygon':
-    tiles = slippy_util.convert_polygon_to_tiles(zoom, coordinates)
-  else:
-    raise ValueError('Invalid coord_type, must be point/path/polygon')
-  return tiles
-
-
-def _GetRequestParameter(name, default):
-  """Parses a web request parameter, regardless of how it was passed in.
-
-  Args:
-    name: request parameter name
-    default: default value to return if not found
-  Returns:
-    Value if found, default if not found
-  """
-  if request.json:
-    r = default if name not in request.json else request.json[name]
-  elif request.args:
-    r = request.args.get(name, default)
-  elif request.form:
-    r = default if name not in request.form else request.form[name]
-  else:
-    log.error('Request is in an unknown format: %s', str(request))
-    r = default
-  return r
-
-
-def _FormatResult(result):
-  """Formats the result for returning via the web service.
-
-  Args:
-    result: JSend version of the result, complete with code if in error
-  Returns:
-    Aborts if the code is not 200, otherwise returns JSON formatted response
-  """
-  if 'code' in result and str(result['code']) != '200':
-    abort(result['code'], result['message'])
-  else:
-    return jsonify(result)
+  return jsonify(response_body)
 
 
 def ParseOptions(argv):
@@ -606,14 +514,6 @@ def ParseOptions(argv):
   """
   parser = OptionParser(
       usage='usage: %prog [options]', version='%prog ' + VERSION)
-  parser.add_option(
-      '-z',
-      '--zookeeper-servers',
-      dest='connectionstring',
-      help='Specific zookeeper server connection string, '
-      'server:port,server:port...'
-      '[or env variable INTERUSS_CONNECTIONSTRING]',
-      metavar='CONNECTIONSTRING')
   parser.add_option(
       '-s',
       '--server',
@@ -683,25 +583,14 @@ def InitializeConnection(options):
 
   if options.verbose:
     log.setLevel(logging.DEBUG)
-  log.debug('Initializing USS metadata manager...')
-  wrapper = storage_interface.USSMetadataManager(options.connectionstring)
-  if options.verbose:
-    wrapper.set_verbose()
   auth = authorization.Authorizer(options.public_key, options.auth_config)
   if options.testid:
     auth.SetTestId(options.testid)
-    wrapper.set_testmode(options.testid)
-    wrapper.delete_testdata(options.testid)
-
-
-def TerminateConnection():
-  global wrapper
-  wrapper = None
 
 
 @webapp.before_first_request
 def BeforeFirstRequest():
-  if wrapper is None:
+  if auth is None:
     InitializeConnection(ParseOptions([]))
 
 
