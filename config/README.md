@@ -1,42 +1,82 @@
 # Multi-region cockroachdb setup
 
-## Prerequisites:
-* Download & install:
- - helm
- - kubectl
- - docker
- - cockroachdb
- - [Optional] Golang. Recommended to understand go, and the go toolchain.
- - [Optional] Run `make all` in the top level directory
- - [Optional] minikube, docker-for-mac, or other local kubernetes system.
+## Prerequisites
 
-* This README takes you through the steps of running the DSS on Kubernetes and assumes familiarity with Kubernetes. It is also recommended to read up on CockroachDB, although that is not a requirement.
+Download & install:
 
-0. Clone/Fork this repo
-1. Run `export NAMESPACE=YOUR_KUBERNETES_NAMESPACE`.
-2. Make sure your `$KUBECONFIG` is pointed to the proper Kubernetes cluster and your context is set accordingly.
-3. Ensure cockroach binary is installed and is able to be run with `cockroach version`. We use this to generate the certs in the python script.
-4. Uncomment and fill out the **create_clusters** section in `make-certs.py` with the Kube namespace only.
-  * If you are joining existing clusters, make sure to fill in the join_clusters variable with the appropriate node addresses and the path to their public cert.
+*   helm
+*   kubectl
+*   docker
+*   cockroachdb
+*   [Optional] Golang. Recommended to understand go, and the go toolchain.
 
-   Run the `make-certs.py` script to generate the certs
 
-   > `python2.7 make-certs.py`
+## Building Docker images
 
-   This script does 2 things:
+The grpc-backend and http-gateway binaries are built as docker images and pushed
+to Google Container Registry in your cloud project.
 
-- Builds a certificate directory structure
-- Creates certificates within their respective directory to be used by the `apply-certs.sh` script.
+List existing images:
 
-5. Run `apply-certs.sh`. This script will delete existing secrets on the cluster named `cockroachdb.client.root` and `cockroachdb.node` and create secrets on the cluster containing the certificates that were generated from the python script.
-6. Build the docker images for both the gRPC backend and HTTP Gateway. From the project's root directory:
-  * $ `docker build -f cmds/grpc-backend/Dockerfile -t grpc-backend .`
-  * $ `docker build -f cmds/http-gateway/Dockerfile -t http-gateway .`
-  * Tag and push both containers to a Docker repo that your kubernetes cluster can access.
-7. Fill out the `values.yaml` file with at minimum the ips, namespace, and storageClass, backendImage, and gatewayImage values.
-8. Run `helm template . > cockroachdb.yaml` to render the YAML.
-9. Run `kubectl apply -f cockroackdb.yaml` to apply it to the cluster.
-10. Now that you have some pods, run `./expose.sh` to create an external IP for each pod.
-11. Make sure that all of your necessary IP's are static.
-12. Fill in these new IP addresses in make-certs and values.yaml file. Repeat steps 5-9.
-  * TODO: automate this so we don't have to repeat these steps.
+    gcloud --project <CLOUD_PROJECT> container images list
+
+List the tags on an existing image:
+
+    gcloud --project <CLOUD_PROJECT> container images list-tags gcr.io/<CLOUD_PROJECT>/http-gateway
+
+Build a new image:
+
+    docker build -f cmds/http-gateway/Dockerfile  . -t gcr.io/<CLOUD_PROJECT>/http-gateway:<VERSION>
+
+Push your new image to Google Container Registry:
+
+    docker push gcr.io/<CLOUD_PROJECT>/http-gateway:<VERSION>
+
+
+## Creating a new Kubernetes cluster on GCE
+
+Create a new cluster in the given zone:
+
+    gcloud --project <CLOUD_PROJECT> container clusters create <CLUSTER_NAME> --zone <ZONE>
+
+Fetch credentials for the cluster.  This populates your \~/.kube/config file
+and makes all future kubecfg commands target this cluster.
+
+    gcloud --project <CLOUD_PROJECT> container clusters get-credentials <CLUSTER_NAME>
+
+
+## Creating a new cockroachdb cluster
+
+1.  Use the `make-certs.py` script to create certificates for the new
+    cockroachdb cluster:
+
+        ./make_certs.py <NAMESPACE> \
+            [--node-address <ADDRESS>]
+            [--node-ca-cert <FILENAME>]
+
+    *   If you are joining existing clusters, make sure to provide their public
+        CA certificates with --node-ca-cert, and their addresses with
+        --node-address.
+
+1.  Use the `apply-certs.sh` script to create secrets on the Kubernetes cluster
+    containing the certificates and keys generated in the previous step.
+
+        ./apply-certs.sh <NAMESPACE>
+
+1.  Copy `values.yaml.template` to `values.yaml` and fill in the required fields
+    at the top.
+1.  Run `helm template . > cockroachdb.yaml` to render the YAML.
+1.  Run `kubectl apply -f cockroachdb.yaml` to apply it to the cluster.
+1.  Use the `./expose.sh` script to create an external IP for each pod:
+
+        ./expose.sh <NAMESPACE>
+
+1.  Find out the external IP addresses that were just created:
+
+        kubectl get svc --namespace <NAMESPACE>
+
+1.  Add the external IP addresses for the `crdb-node-*` entries to the `ips`
+    list in the values.yaml file.
+1.  Re-run the `./make_certs.py` script with the external IP addresses added to
+    `--node-address` flags.
+1.  Re-run the `./apply-certs.sh`, `helm template` and `kubectl apply` steps.
