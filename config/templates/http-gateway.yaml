@@ -33,12 +33,12 @@ spec:
     spec:
       containers:
       - name: http-gateway
-        image: {{ .gatewayImage }}
+        image: {{ .Values.gatewayImage }}
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8080
           name: http
         args:
-          - -grpc-backend=grpc-backend.{{ .Values.namespace }}:{{ .GrpcPort }}
-          - -addr=:{{ .HttpPort }}
+          - -grpc-backend=grpc-backend.{{ .Values.namespace }}:{{ .Values.GrpcPort }}
+          - -addr=:{{ .Values.HttpPort }}
 

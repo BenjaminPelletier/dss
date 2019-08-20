@@ -53,9 +53,9 @@ spec:
         - name: public-certs
           mountPath: /public-certs
         args:
-          - -addr=:{{ .GrpcPort }}
-          - -cockroach_host=cockroachdb-public.{{ .Values.namespace}}
-          - -cockroach_port={{ .CockroachPort }}
+          - -addr=:{{ .Values.GrpcPort }}
+          - -cockroach_host=cockroachdb-public.{{ .Values.namespace }}
+          - -cockroach_port={{ .Values.CockroachPort }}
           - -cockroach_ssl_mode=verify-full
           - -cockroach_user=root
           - -cockroach_ssl_dir=/cockroach-certs
