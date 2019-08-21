@@ -28,10 +28,12 @@ List the tags on an existing image:
 Build a new image:
 
     docker build -f cmds/http-gateway/Dockerfile  . -t gcr.io/<CLOUD_PROJECT>/http-gateway:<VERSION>
+    docker build -f cmds/grpc-backend/Dockerfile  . -t gcr.io/<CLOUD_PROJECT>/grpc-backend:<VERSION>
 
 Push your new image to Google Container Registry:
 
     docker push gcr.io/<CLOUD_PROJECT>/http-gateway:<VERSION>
+    docker push gcr.io/<CLOUD_PROJECT>/grpc-backend:<VERSION>
 
 
 ## Creating a new Kubernetes cluster on GCE
