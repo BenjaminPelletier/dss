@@ -8,6 +8,7 @@ Download & install:
 *   kubectl
 *   docker
 *   cockroachdb
+*   Google Cloud SDK
 *   [Optional] Golang. Recommended to understand go, and the go toolchain.
 
 
@@ -47,10 +48,10 @@ and makes all future kubecfg commands target this cluster.
 
 ## Creating a new cockroachdb cluster
 
-1.  Use the `make-certs.py` script to create certificates for the new
-    cockroachdb cluster:
+1.  Use the `make-certs.py` script in this directory to create certificates for
+    the new cockroachdb cluster:
 
-        ./make_certs.py <NAMESPACE> \
+        ./make-certs.py <NAMESPACE> \
             [--node-address <ADDRESS>]
             [--node-ca-cert <FILENAME>]
 
@@ -58,8 +59,9 @@ and makes all future kubecfg commands target this cluster.
         CA certificates with --node-ca-cert, and their addresses with
         --node-address.
 
-1.  Use the `apply-certs.sh` script to create secrets on the Kubernetes cluster
-    containing the certificates and keys generated in the previous step.
+1.  Use the `apply-certs.sh` script in this directory to create secrets on the
+    Kubernetes cluster containing the certificates and keys generated in the
+    previous step.
 
         ./apply-certs.sh <NAMESPACE>
 
@@ -67,7 +69,8 @@ and makes all future kubecfg commands target this cluster.
     at the top.
 1.  Run `helm template . > cockroachdb.yaml` to render the YAML.
 1.  Run `kubectl apply -f cockroachdb.yaml` to apply it to the cluster.
-1.  Use the `./expose.sh` script to create an external IP for each pod:
+1.  Use the `./expose.sh` script in this directory to create an external IP for
+    each pod:
 
         ./expose.sh <NAMESPACE>
 
@@ -77,7 +80,7 @@ and makes all future kubecfg commands target this cluster.
 
 1.  Add the external IP addresses for the `crdb-node-*` entries to the `ips`
     list in the values.yaml file and re-run the `helm template` command.
-1.  Re-run the `./make_certs.py` script with the external IP addresses added to
+1.  Re-run the `./make-certs.py` script with the external IP addresses added to
     `--node-address` flags, then re-run `./apply-certs.sh`.
 1.  We now need to restart Cockroachdb with the new certs and new IP addresses,
     but simply doing a `kubectl apply` won't restart the running containers, so
