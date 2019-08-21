@@ -76,7 +76,12 @@ and makes all future kubecfg commands target this cluster.
         kubectl get svc --namespace <NAMESPACE>
 
 1.  Add the external IP addresses for the `crdb-node-*` entries to the `ips`
-    list in the values.yaml file.
+    list in the values.yaml file and re-run the `helm template` command.
 1.  Re-run the `./make_certs.py` script with the external IP addresses added to
-    `--node-address` flags.
-1.  Re-run the `./apply-certs.sh`, `helm template` and `kubectl apply` steps.
+    `--node-address` flags, then re-run `./apply-certs.sh`.
+1.  We now need to restart Cockroachdb with the new certs and new IP addresses,
+    but simply doing a `kubectl apply` won't restart the running containers, so
+    delete the StatefulSet and then re-create it:
+
+        kubectl delete sts cockroachdb --namespace <NAMESPACE>
+        kubectl apply -f cockroachdb.yaml
