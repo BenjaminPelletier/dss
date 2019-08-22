@@ -52,18 +52,25 @@ services:
     restart: always
 
   storage_api:
-    image: interussplatform/storage_api:publicportal
+    image: interussplatform/storage_api:astm_stub
     expose:
       - 5000
     environment:
       - INTERUSS_API_PORT=5000
-      - INTERUSS_PUBLIC_KEY=${INTERUSS_PUBLIC_KEY:?INTERUSS_PUBLIC_KEY environment variable not set}
+      - INTERUSS_AUTH_CONFIG=file:///usr/src/app/auth.json
       - INTERUSS_CONNECTIONSTRING=zoo:2181
       - INTERUSS_VERBOSE=${INTERUSS_VERBOSE:-true}
       - INTERUSS_TESTID=${INTERUSS_TESTID:-}
+    volumes:
+      - "${INTERUSS_AUTH_CONFIG:?Environment variable SSL_CERT_PATH must be set}:/usr/src/app/auth.json"
     depends_on:
       - zoo
     restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "10"
 
   reverse_proxy:
     image: interussplatform/reverse_proxy

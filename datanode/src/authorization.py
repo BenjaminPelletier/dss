@@ -132,7 +132,11 @@ class Authorizer(object):
     valid = False
     for authority in authorities:
       try:
-        jwt.decode(token, authority.public_key, algorithms='RS256')
+        if 'aud' in r:
+          # Accept any audience for debugging; TODO: fix
+          jwt.decode(token, authority.public_key, algorithms='RS256', audience=r['aud'])
+        else:
+          jwt.decode(token, authority.public_key, algorithms='RS256')
         valid = True
         break
       except jwt.InvalidSignatureError:
@@ -147,18 +151,22 @@ class Authorizer(object):
       # Check against all authorities
       for authority in self.authorities:
         try:
-          jwt.decode(token, authority.public_key, algorithms='RS256')
-          invalid_tile = None
+          if 'aud' in r:
+            # Accept any audience for debugging; TODO: fix
+            jwt.decode(token, authority.public_key, algorithms='RS256', audience=r['aud'])
+          else:
+            jwt.decode(token, authority.public_key, algorithms='RS256')
+          invalid_cell = None
           if cell_ids:
             for cell_id in cell_ids:
               if not authority.is_applicable(issuer, cell_id):
-                invalid_tile = cell_id
+                invalid_cell = cell_id
                 break
-          if invalid_tile:
+          if invalid_cell:
             raise AuthorizationError(
                 status.HTTP_401_UNAUTHORIZED,
-                'Access token has valid signature but %s is not applicable to '
-                'tile %s' % (authority.name, str(invalid_tile)))
+                'Access token has valid signature but "%s" is not applicable to %s' %
+                (authority.name, str(invalid_cell)))
           else:
             raise AuthorizationError(status.HTTP_401_UNAUTHORIZED,
                         'Access token has valid signature but does not match '
@@ -166,6 +174,11 @@ class Authorizer(object):
         except jwt.InvalidSignatureError:
           # Token signature isn't valid for this authority
           pass
+        except jwt.ExpiredSignatureError:
+          log.error('Access token has expired.')
+          raise AuthorizationError(status.HTTP_401_UNAUTHORIZED,
+                                   'OAuth access_token is invalid: token has expired.')
+
       raise AuthorizationError(status.HTTP_401_UNAUTHORIZED,
                   'Access token signature is invalid')
 
@@ -312,7 +325,11 @@ def _ParseAuthorities(config_string):
   Returns:
     List of AuthorizationAuthorities described in provided config.
   """
+  print('Original config string:')
+  print(config_string)
   config_string = parse_string_source(config_string)
+  print('Parsing auth authorities:')
+  print(config_string)
 
   authority_specs = json.loads(config_string)
   authorities = []

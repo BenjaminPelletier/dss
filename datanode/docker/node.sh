@@ -23,16 +23,15 @@ if [ "$1" == "" ]; then
   exit 0
 fi
 
-wget -N https://raw.githubusercontent.com/wing-aviation/InterUSS-Platform/publicportal/datanode/docker/docker-compose.yaml
-wget -N https://raw.githubusercontent.com/wing-aviation/InterUSS-Platform/publicportal/datanode/docker/docker-compose_localssl.yaml
-wget -N https://**YOUR AUTH SERVER (e.g., auth.staging.interussplatform.com:8121)**/key
+wget -N https://raw.githubusercontent.com/wing-aviation/InterUSS-Platform/astm_stub/datanode/docker/docker-compose.yaml
+wget -N https://raw.githubusercontent.com/wing-aviation/InterUSS-Platform/astm_stub/datanode/docker/docker-compose_localssl.yaml
 export SSL_CERT_PATH=**FULL LOCAL PATH CONTAINING SSL CERTIFICATE**
 export SSL_KEY_PATH=**FULL LOCAL PATH CONTAINING SSL CERTIFICATE KEY**
 export SSL_CERT_NAME=**NAME OF SSL CERTIFICATE FILE (e.g., cert.crt or cert.chained.pem)**
 export SSL_KEY_NAME=**NAME OF SSL KEY FILE (e.g., private.pem or cert.key)**
 export ZOO_MY_ID=1
 export ZOO_SERVERS=0.0.0.0:2888:3888
-export INTERUSS_PUBLIC_KEY="`cat key`"
+export INTERUSS_AUTH_CONFIG=**JSON AUTH FILE**
 if [ "$1" == "up" ]; then
   docker-compose -f docker-compose.yaml -f docker-compose_localssl.yaml -p datanode up -d
 else
