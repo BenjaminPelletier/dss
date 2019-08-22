@@ -299,7 +299,7 @@ def Status():
                   'version': VERSION})
 
 
-@webapp.route('/dss/identification_service_areas', methods=['GET'])
+@webapp.route('/v1/dss/identification_service_areas', methods=['GET'])
 def SearchIdentificationServiceAreasHandler():
   earliest_time_string = request.args.get('earliest_time', None)
   if not earliest_time_string:
@@ -339,7 +339,7 @@ def SearchIdentificationServiceAreasHandler():
   return jsonify(response_body)
 
 
-@webapp.route('/dss/identification_service_areas/<id>', methods=['GET'])
+@webapp.route('/v1/dss/identification_service_areas/<id>', methods=['GET'])
 def GetIdentificationServiceAreaHandler(id):
   with db.lock:
     entity_ref = db.identification_service_areas.get(id)
@@ -360,7 +360,7 @@ def GetIdentificationServiceAreaHandler(id):
   return jsonify(response_body)
 
 
-@webapp.route('/dss/identification_service_areas/<id>', methods=['PUT'])
+@webapp.route('/v1/dss/identification_service_areas/<id>', methods=['PUT'])
 def CreateIdentificationServiceAreaHandler(id):
   request_body = request.json
 
@@ -402,7 +402,7 @@ def CreateIdentificationServiceAreaHandler(id):
   return jsonify(response_body)
 
 
-@webapp.route('/dss/identification_service_areas/<id>/<version>', methods=['PUT'])
+@webapp.route('/v1/dss/identification_service_areas/<id>/<version>', methods=['PUT'])
 def UpdateIdentificationServiceAreaHandler(id, version):
   request_body = request.json
 
@@ -450,7 +450,7 @@ def UpdateIdentificationServiceAreaHandler(id, version):
   return jsonify(response_body)
 
 
-@webapp.route('/dss/identification_service_areas/<id>/<version>', methods=['DELETE'])
+@webapp.route('/v1/dss/identification_service_areas/<id>/<version>', methods=['DELETE'])
 def DeleteIdentificationServiceAreaHandler(id, version):
   with db.lock:
     entity_ref = db.identification_service_areas.get(id)
@@ -478,7 +478,7 @@ def DeleteIdentificationServiceAreaHandler(id, version):
   return jsonify(response_body)
 
 
-@webapp.route('/dss/subscriptions', methods=['GET'])
+@webapp.route('/v1/dss/subscriptions', methods=['GET'])
 def GetSubscriptionsHandler():
   try:
     cell_ids = parse_geo_polygon_string(request.args.get('area', None))
@@ -504,7 +504,7 @@ def GetSubscriptionsHandler():
   return jsonify(response_body)
 
 
-@webapp.route('/dss/subscriptions/<id>', methods=['GET'])
+@webapp.route('/v1/dss/subscriptions/<id>', methods=['GET'])
 def GetSubscriptionHandler(id):
   with db.lock:
     entity_ref = db.subscriptions.get(id)
@@ -525,7 +525,7 @@ def GetSubscriptionHandler(id):
   return jsonify(response_body)
 
 
-@webapp.route('/dss/subscriptions/<id>', methods=['PUT'])
+@webapp.route('/v1/dss/subscriptions/<id>', methods=['PUT'])
 def CreateSubscriptionHandler(id):
   request_body = request.json
 
@@ -570,7 +570,7 @@ def CreateSubscriptionHandler(id):
   return jsonify(response_body)
 
 
-@webapp.route('/dss/subscriptions/<id>/<version>', methods=['PUT'])
+@webapp.route('/v1/dss/subscriptions/<id>/<version>', methods=['PUT'])
 def UpdateSubscriptionHandler(id, version):
   request_body = request.json
 
@@ -620,7 +620,7 @@ def UpdateSubscriptionHandler(id, version):
   return jsonify(response_body)
 
 
-@webapp.route('/dss/subscriptions/<id>/<version>', methods=['DELETE'])
+@webapp.route('/v1/dss/subscriptions/<id>/<version>', methods=['DELETE'])
 def DeleteSubscriptionHandler(id, version):
   with db.lock:
     entity_ref = db.subscriptions.get(id)
