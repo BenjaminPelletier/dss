@@ -179,6 +179,7 @@ def parse_geo_polygon_string(geo_polygon_string):
 
 def isa_to_json(entity_ref):
   return {
+    'id': entity_ref.id,
     'flights_url': entity_ref.data['flights_url'],
     'owner': entity_ref.data['owner'],
     'time_start': entity_ref.time_start.isoformat(),
