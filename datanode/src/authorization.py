@@ -73,7 +73,7 @@ class Authorizer(object):
       tiles: collection of (zoom, x,y) slippy tiles user is attempting to access
 
     Returns:
-      USS identification from OAuth client_id or sub field
+      USS identification from OAuth sub or client_id field
 
     Raises:
       HTTPException: when the access token is invalid or inappropriate
@@ -95,7 +95,9 @@ class Authorizer(object):
     # Verify validity of claims without checking signature
     try:
       r = jwt.decode(token, algorithms='RS256', verify=False)
-      uss_id = r['client_id'] if 'client_id' in r else r.get('sub', None)
+      uss_id = r.get('sub', r.get('client_id', None))
+      if not uss_id:
+        raise AuthorizationError(status.HTTP_400_BAD_REQUEST, 'Access token missing `sub` and `client_id`')
       if required_scope not in r.get('scope', ''):
         raise AuthorizationError(status.HTTP_403_FORBIDDEN,
                     'Access token missing required scope %s; found %s' %

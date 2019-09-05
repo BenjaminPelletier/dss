@@ -194,8 +194,8 @@ def subscription_to_json(entity_ref):
     'callbacks': entity_ref.data['callbacks'],
     'owner': entity_ref.data['owner'],
     'notification_index': entity_ref.data['notification_index'],
-    'time_start': entity_ref.time_end.isoformat(),
-    'time_end': entity_ref.time_start.isoformat(),
+    'time_start': entity_ref.time_start.isoformat(),
+    'time_end': entity_ref.time_end.isoformat(),
     'version': entity_ref.data['version']
   }
 
@@ -246,8 +246,11 @@ def parse_extents(request_body):
 
   if 'extents' not in request_body:
     raise ParseError(status.HTTP_400_BAD_REQUEST, 'Missing extents parameter in request body')
-  extents = request_body['extents']
-  
+  try:
+    extents = request_body['extents']
+  except TypeError:
+    raise ParseError(status.HTTP_400_BAD_REQUEST, 'Error retrieving `extents` from request body')
+
   if 'time_start' not in extents:
     raise ParseError(status.HTTP_400_BAD_REQUEST, 'Missing time_start in extents')
   try:
@@ -364,6 +367,9 @@ def GetIdentificationServiceAreaHandler(id):
 @webapp.route('/v1/dss/identification_service_areas/<id>', methods=['PUT'])
 def CreateIdentificationServiceAreaHandler(id):
   request_body = request.json
+  if request_body is None:
+    return error_response(status.HTTP_400_BAD_REQUEST,
+                          'Missing JSON body in request; did you include Content-Type: application/json header?')
 
   try:
     time_start, time_end, cell_ids = parse_extents(request_body)
@@ -406,6 +412,9 @@ def CreateIdentificationServiceAreaHandler(id):
 @webapp.route('/v1/dss/identification_service_areas/<id>/<version>', methods=['PUT'])
 def UpdateIdentificationServiceAreaHandler(id, version):
   request_body = request.json
+  if request_body is None:
+    return error_response(status.HTTP_400_BAD_REQUEST,
+                          'Missing JSON body in request; did you include Content-Type: application/json header?')
 
   try:
     time_start, time_end, cell_ids = parse_extents(request_body)
@@ -434,8 +443,8 @@ def UpdateIdentificationServiceAreaHandler(id, version):
     if old_entity_ref is None:
       return error_response(status.HTTP_404_NOT_FOUND, 'No Identification Service Area found with id ' + id)
     if old_entity_ref.data.get('version', None) != version:
-      message = ('Provided version %s does not match pre-existing Identification Service Area version ' +
-                 old_entity_ref.data.get('version', '<missing>'))
+      message = ('Provided version %s does not match pre-existing Identification Service Area version %s' %
+                 (version, str(old_entity_ref.data.get('version', '<missing>'))))
       return error_response(status.HTTP_409_CONFLICT, message)
     db.identification_service_areas.upsert(entity_ref)
     subscribers = get_affected_subscribers(entity_ref)
@@ -463,8 +472,8 @@ def DeleteIdentificationServiceAreaHandler(id, version):
     if entity_ref is None:
       return error_response(status.HTTP_404_NOT_FOUND, 'No Identification Service Area found with id ' + id)
     if entity_ref.data.get('version', None) != version:
-      message = ('Provided version %s does not match pre-existing Identification Service Area version ' +
-                 entity_ref.data.get('version', '<missing>'))
+      message = ('Provided version %s does not match pre-existing Identification Service Area version %s' %
+                 (version, str(entity_ref.data.get('version', '<missing>'))))
       return error_response(status.HTTP_409_CONFLICT, message)
     db.identification_service_areas.remove(id)
     subscribers = get_affected_subscribers(entity_ref)
@@ -529,6 +538,9 @@ def GetSubscriptionHandler(id):
 @webapp.route('/v1/dss/subscriptions/<id>', methods=['PUT'])
 def CreateSubscriptionHandler(id):
   request_body = request.json
+  if request_body is None:
+    return error_response(status.HTTP_400_BAD_REQUEST,
+                          'Missing JSON body in request; did you include Content-Type: application/json header?')
 
   try:
     time_start, time_end, cell_ids = parse_extents(request_body)
@@ -574,6 +586,9 @@ def CreateSubscriptionHandler(id):
 @webapp.route('/v1/dss/subscriptions/<id>/<version>', methods=['PUT'])
 def UpdateSubscriptionHandler(id, version):
   request_body = request.json
+  if request_body is None:
+    return error_response(status.HTTP_400_BAD_REQUEST,
+                          'Missing JSON body in request; did you include Content-Type: application/json header?')
 
   try:
     time_start, time_end, cell_ids = parse_extents(request_body)
@@ -605,8 +620,8 @@ def UpdateSubscriptionHandler(id, version):
     if old_entity_ref is None:
       return error_response(status.HTTP_404_NOT_FOUND, 'No Subscription found with id ' + id)
     if old_entity_ref.data.get('version', None) != version:
-      message = ('Provided version %s does not match pre-existing Subscription version ' +
-                 old_entity_ref.data.get('version', '<missing>'))
+      message = ('Provided version %s does not match pre-existing Subscription version %s' %
+                 (version, str(old_entity_ref.data.get('version', '<missing>'))))
       return error_response(status.HTTP_409_CONFLICT, message)
     db.subscriptions.upsert(entity_ref)
     isas = db.identification_service_areas.list_from_cells(cell_ids, time_start, time_end)
@@ -633,8 +648,8 @@ def DeleteSubscriptionHandler(id, version):
     if entity_ref is None:
       return error_response(status.HTTP_404_NOT_FOUND, 'No Subscription found with id ' + id)
     if entity_ref.data.get('version', None) != version:
-      message = ('Provided version %s does not match pre-existing Subscription version ' +
-                 entity_ref.data.get('version', '<missing>'))
+      message = ('Provided version %s does not match pre-existing Subscription version %s' %
+                 (version, str(entity_ref.data.get('version', '<missing>'))))
       return error_response(status.HTTP_409_CONFLICT, message)
     db.subscriptions.remove(id)
 
