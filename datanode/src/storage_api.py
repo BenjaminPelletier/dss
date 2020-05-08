@@ -49,6 +49,8 @@ import jwt
 # rest_framework is for HTTP status codes
 from rest_framework import status
 
+# Tools for checking client authorization
+import authorization
 # Our main class for accessing metadata from the locking system
 import storage_interface
 # Tools for slippy conversion
@@ -117,6 +119,69 @@ def Status():
                         'version': VERSION})
 
 
+@webapp.route('/introspect', methods=['GET'])
+def Introspect():
+  #  status checker of FIMS authorization token (access_token)
+  log.debug('Status handler instantiated...')
+  uss_id = authorization.ValidateAccessToken()
+  return _FormatResult({
+      'status': 'success',
+      'message': 'ACCESS TOKEN VALID',
+      'data': {
+          'uss_id': uss_id
+      }
+  })
+
+
+@webapp.route('/introspect/<zoom>/<x>/<y>', methods=['GET'])
+def IntrospectTile(zoom, x, y):
+  """Status checker of FIMS authorization token (access_token).
+  Args:
+    zoom: zoom level to use for encapsulating the tile
+    x: x tile number in slippy tile format
+    y: y tile number in slippy tile format
+  """
+  log.debug('Status handler instantiated...')
+  try:
+    zoom = int(zoom)
+    tiles = ((int(x), int(y)), )
+  except ValueError as e:
+    abort(status.HTTP_400_BAD_REQUEST, e.message)
+  uss_id = authorization.ValidateAccessToken(zoom, tiles)
+  return _FormatResult({
+    'status': 'success',
+    'message': 'ACCESS TOKEN VALID',
+    'data': {
+      'uss_id': uss_id
+    }
+  })
+
+
+@webapp.route('/introspect/<zoom>', methods=['GET'])
+def IntrospectTiles(zoom):
+  """Status checker of FIMS authorization token (access_token).
+  Args:
+    zoom: zoom level to use for encapsulating the tiles
+    Plus posted webargs
+     coords: csv of lon,lat,long,lat,etc.
+     coord_type: (optional) type of coords - point (default), path, polygon
+  """
+  log.debug('Status handler instantiated...')
+  try:
+    zoom = int(zoom)
+    tiles = _ConvertRequestToTiles(zoom)
+  except (ValueError, TypeError, OverflowError) as e:
+    abort(status.HTTP_400_BAD_REQUEST, e.message)
+  uss_id = authorization.ValidateAccessToken(zoom, tiles)
+  return _FormatResult({
+    'status': 'success',
+    'message': 'ACCESS TOKEN VALID',
+    'data': {
+      'uss_id': uss_id
+    }
+  })
+
+
 @webapp.route('/slippy/<zoom>', methods=['GET'])
 def ConvertCoordinatesToSlippy(zoom):
   """Converts an CSV of coords to slippy tile format at the specified zoom.
@@ -168,7 +233,6 @@ def GridCellOperatorHandler(zoom, x, y):
     200 with token and metadata in JSON format,
     or the nominal 4xx error codes as necessary.
   """
-  uss_id = _ValidateAccessToken()
   result = {}
   try:
     zoom = int(zoom)
@@ -177,6 +241,7 @@ def GridCellOperatorHandler(zoom, x, y):
   except ValueError:
     abort(status.HTTP_400_BAD_REQUEST,
           'Invalid parameters for slippy tile coordinates, must be integers.')
+  uss_id = authorization.ValidateAccessToken(zoom, ((x, y),))
   if request.method == 'GET':
     result = _GetGridCellOperator(zoom, x, y)
   elif request.method in ('PUT', 'POST'):
@@ -243,7 +308,6 @@ def GridCellsOperatorDataHandler(zoom):
     200 with token and metadata in JSON format,
     or the nominal 4xx error codes as necessary.
   """
-  uss_id = _ValidateAccessToken()
   result = {}
   try:
     zoom = int(zoom)
@@ -255,6 +319,7 @@ def GridCellsOperatorDataHandler(zoom):
     abort(status.HTTP_400_BAD_REQUEST, e.message)
   except OverflowError as e:
     abort(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, e.message)
+  uss_id = authorization.ValidateAccessToken(zoom, tiles)
   if request.method == 'GET':
     result = _GetGridCellsOperator(zoom, tiles)
   elif request.method in ('PUT', 'POST'):
@@ -373,79 +438,9 @@ def UvrDataHandler(zoom, message_id):
 ######################################################################
 ################       INTERNAL FUNCTIONS    #########################
 ######################################################################
-def _ValidateAccessToken(required_scope=None):
-  """Checks the access token, aborting if it does not pass.
 
-  Uses an Oauth public key to validate an access token.
-
-  Args:
-    required_scope: If specified, an explicit scope that must be in the list of
-      granted scopes for authorization to succeed. Defaults to DEFAULT_SCOPE.
-
-  Returns:
-    USS identification from OAuth client_id field
-  """
-  if not required_scope:
-    required_scope = DEFAULT_SCOPE
-  uss_id = None
-  if ('access_token' in request.headers and TESTID and
-    TESTID in request.headers['access_token']) :
-    uss_id = request.headers['access_token']
-  elif ('Authorization' in request.headers and TESTID and
-        TESTID in request.headers['Authorization']):
-    uss_id = request.headers['Authorization']
-  elif (TESTID and 'access_token' not in request.headers and
-        'Authorization' not in request.headers):
-    uss_id = TESTID
-  else:
-    # TODO(hikevin): Replace with OAuth Discovery and JKWS
-    secret = os.getenv('INTERUSS_PUBLIC_KEY')
-    token = None
-    if 'Authorization' in request.headers:
-      token = request.headers['Authorization'].replace('Bearer ', '')
-    elif 'access_token' in request.headers:
-      token = request.headers['access_token']
-    if secret and token:
-      # ENV variables sometimes don't pass newlines, spec says white space
-      # doesn't matter, but pyjwt cares about it, so fix it
-      secret = secret.replace(' PUBLIC ', '_PLACEHOLDER_')
-      secret = secret.replace(' ', '\n')
-      secret = secret.replace('_PLACEHOLDER_', ' PUBLIC ')
-      try:
-        r = jwt.decode(token, secret, algorithms='RS256')
-      except jwt.ExpiredSignatureError:
-        log.error('Access token has expired.')
-        abort(status.HTTP_401_UNAUTHORIZED,
-              'OAuth access_token is invalid: token has expired.')
-      except jwt.DecodeError:
-        log.error('Access token is invalid and cannot be decoded.')
-        abort(status.HTTP_400_BAD_REQUEST,
-              'OAuth access_token is invalid: token cannot be decoded.')
-      except jwt.ImmatureSignatureError:
-        log.error('Access token nbf claim represents a time in the future.')
-        abort(status.HTTP_400_BAD_REQUEST,
-              'OAuth access_token is invalid: nbf claim represents a time in the future.')
-      except Exception as e:
-        log.error('Uncategorized error processing JWT: ' + str(e))
-        abort(status.HTTP_400_BAD_REQUEST,
-              'OAuth access_token is invalid: uncategorized error.')
-
-      if required_scope in r['scope']:
-        uss_id = r['sub']
-      else:
-        log.error('%s not in scope %s', required_scope, r['scope'])
-        abort(status.HTTP_401_UNAUTHORIZED,
-              'OAuth access_token is invalid: '
-              'scope not valid for requested operation.')
-    else:
-      log.error('Attempt to access resource without access_token in header.')
-      abort(status.HTTP_403_FORBIDDEN,
-            'Valid OAuth access_token must be provided in header.')
-  return uss_id
-
-
-def _GetGridCellOperator(zoom, x, y):
-  """Provides an instantaneous snapshot of operators for a specific GridCell.
+def _GetGridCellMetaData(zoom, x, y):
+  """Provides an instantaneous snapshot of the metadata for a specific GridCell.
 
   GridCellOperator provides an instantaneous snapshot of the operators stored
   in a specific GridCell, along with a token to be used when updating. For
@@ -933,12 +928,6 @@ def _FormatResult(result):
     return jsonify(result)
 
 
-def _VerifyPublicKey():
-  if not os.environ.get('INTERUSS_PUBLIC_KEY'):
-    log.error('INTERUSS_PUBLIC_KEY environment variable must be set.')
-    sys.exit(-1)
-
-
 def ParseOptions(argv):
   """Parses desired options from the command line.
 
@@ -950,7 +939,6 @@ def ParseOptions(argv):
   Returns:
     Options structure
   """
-  global TESTID
   parser = OptionParser(
       usage='usage: %prog [options]', version='%prog ' + VERSION)
   parser.add_option(
@@ -1000,13 +988,13 @@ def ParseOptions(argv):
 def InitializeConnection(options=None):
   """Initializes the wrapper and the connection to the zookeeper servers.
 
-  The side effects of this method are to set the global variables 'wrapper' and
-  'TESTID'.
+  The side effects of this method are to set the global variable 'wrapper' and
+  call authorization.set_test_id if appropriate.
 
   Args:
     options: Options structure with a field per option.
   """
-  global wrapper, TESTID
+  global wrapper
   if (options and options.verbose) or os.environ.get('INTERUSS_VERBOSE'):
     log.setLevel(logging.DEBUG)
   log.debug('Initializing USS metadata manager...')
@@ -1016,10 +1004,10 @@ def InitializeConnection(options=None):
   if (options and options.verbose) or os.environ.get('INTERUSS_VERBOSE'):
     wrapper.set_verbose()
   if (options and options.testid) or os.environ.get('INTERUSS_TESTID'):
-    TESTID = os.getenv('INTERUSS_TESTID', options.testid if options else None)
-    log.info('Authorization set to test mode with TESTID=%s' % TESTID)
-    wrapper.set_testmode(TESTID)
-    wrapper.delete_testdata(TESTID)
+    testid = os.getenv('INTERUSS_TESTID', options.testid if options else None)
+    authorization.SetTestId(testid)
+    wrapper.set_testmode(testid)
+    wrapper.delete_testdata(testid)
 
 
 def TerminateConnection():
@@ -1030,12 +1018,10 @@ def TerminateConnection():
 @webapp.before_first_request
 def BeforeFirstRequest():
   if wrapper is None:
-    _VerifyPublicKey()
     InitializeConnection()
 
 
 def main(argv):
-  _VerifyPublicKey()
   log.debug(
       """Instantiated application, parsing commandline
     %s and initializing connection...""", str(argv))
