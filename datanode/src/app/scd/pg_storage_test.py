@@ -22,7 +22,7 @@ import uuid
 from dateutil import parser
 
 import storage_interface
-import test_utils
+from app import dss
 import uss_metadata
 
 # NOTE: A cockroach DB instance must be available for these tests to succeed.
@@ -573,7 +573,7 @@ class InterUSSStorageInterfaceTestCase(unittest.TestCase):
     grids = [(1, 0), (0, 1), (1, 1), (50, 62)]
     message_id = str(uuid.uuid4())
     uss_id = 'uss1'
-    uvr = test_utils.make_uvr(uss_id, message_id)
+    uvr = dss.datanode.src.app.test_utils.make_uvr(uss_id, message_id)
 
     # Make sure the grid starts empty
     s = self.mm.get_multi(11, grids)
@@ -610,7 +610,7 @@ class InterUSSStorageInterfaceTestCase(unittest.TestCase):
     grids = [(1, 0), (0, 1), (1, 1)]
     message_id = str(uuid.uuid4())
     uss_id = 'uss1'
-    uvr = test_utils.make_uvr(uss_id, message_id)
+    uvr = dss.datanode.src.app.test_utils.make_uvr(uss_id, message_id)
 
     # Correctly emplace a UVR and make sure it's there
     s = self.mm.insert_uvr(11, grids, uvr)
@@ -627,7 +627,7 @@ class InterUSSStorageInterfaceTestCase(unittest.TestCase):
 
     # Add a second UVR and make sure it's there
     message_id2 = str(uuid.uuid4())
-    uvr2 = test_utils.make_uvr(uss_id, message_id2)
+    uvr2 = dss.datanode.src.app.test_utils.make_uvr(uss_id, message_id2)
     grids2 = [(1, 0), (0, 1), (2, 2)]
     s = self.mm.insert_uvr(11, grids2, uvr2)
     self.assertEqual('success', s['status'])

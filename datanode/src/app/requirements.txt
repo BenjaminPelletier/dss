@@ -1,0 +1,10 @@
+cryptography
+flask
+geojson
+gunicorn
+PyJWT
+python-dateutil
+pytz
+requests
+s2sphere
+shapely

@@ -1,26 +1,6 @@
 ## Files of interest:
 
-*   storage_interface.py - Cockroach Wrapper library in python. It contains one
-    class of interest: USSMetadataManager with get/set/delete operations and an
-    initialization with a connection string following [libpq connection string
-    semantics]{https://www.postgresql.org/docs/current/static/libpq-connect.html#LIBPQ-CONNSTRING}.
-
-*   uss_metadata.py - information wrapper for the actual JSON data structure.
-
-*   storage_api.py - Web Service API for the Cockroach library. It will
-    start a web service and serve GET/PUT/DELETE on
-    /GridCellMetaData/<z>/<x>/<y>, which wraps directly to the
-    USSMetadataManager.
-
-*   storage_api_test.bash - bash system test script, also shows how to start
-    the server in bash.
-
-*   storage_api_test.py - Python unit test for the Web Service API, also
-    shows how to use the API to get, set, and delete metadata.
-
-*   storage_interface_test.py - Python unit test for the Cockroach Wrapper
-    library, also shows how to use the library to get, set, and delete metadata.
-
+...to be updated...
 
 ## Installation
 
