@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 import logging
 import re
-from typing import Dict, Optional, Set
+from typing import Dict, List, Iterable, Optional, Set, Tuple
 import uuid
 
 from app.lib import format_utils
@@ -16,6 +16,16 @@ UUID_VALIDATOR = re.compile('^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[8-b
 
 class Subscription(object):
   """Data structure for an SCD Subscription."""
+  id: uuid.UUID
+  owner: str
+  version: int
+  notification_index: int
+  vol4: geo.Volume4
+  uss_base_url: str
+  notify_for_operations: bool
+  notify_for_constraints: bool
+  implicit_subscription: bool
+  dependent_operations: Set[uuid.UUID]
 
   def __init__(
       self,
@@ -59,7 +69,6 @@ class Subscription(object):
 def from_request(id: str, json: Dict, owner: str, existing_subscription: Optional[Subscription], geo_config: geo.Config) -> Subscription:
   """Create an SCD Subscription from a request structure."""
 
-  # Validate input
   id_uuid = uuid.UUID(id)
 
   if existing_subscription is not None:
@@ -80,10 +89,12 @@ def from_request(id: str, json: Dict, owner: str, existing_subscription: Optiona
   if vol4.time_start is None:
     vol4.time_start = datetime.now(timezone.utc)
 
+  version = json.get('old_version', 0) + 1
+
   return Subscription(
       id=id_uuid,
       owner=owner,
-      version=json.get('old_version', 0),
+      version=version,
       notification_index=0 if existing_subscription is None else existing_subscription.notification_index,
       vol4=vol4,
       uss_base_url=json['uss_base_url'],
@@ -91,3 +102,18 @@ def from_request(id: str, json: Dict, owner: str, existing_subscription: Optiona
       notify_for_constraints=json.get('notify_for_constraints', False),
       implicit_subscription=False,
       dependent_operations=set() if existing_subscription is None else existing_subscription.dependent_operations)
+
+
+def get_subscribers(subs: Iterable[Subscription]) -> List[Dict]:
+  subscribers_by_url: Dict[str, List[Tuple[uuid.UUID, int]]] = {}
+  for sub in subs:
+    if sub.uss_base_url not in subscribers_by_url:
+      subscribers_by_url[sub.uss_base_url] = []
+    subscribers_by_url[sub.uss_base_url].append((sub.id, sub.notification_index))
+  subscribers = []
+  for url in subscribers_by_url:
+    subscriptions = []
+    for subscription_id, notification_index in subscribers_by_url[url]:
+      subscriptions.append({'subscription_id': subscription_id, 'notification_index': notification_index})
+    subscribers.append({'uss_base_url': url, 'subscriptions': subscriptions})
+  return subscribers

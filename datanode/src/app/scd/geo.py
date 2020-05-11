@@ -1,7 +1,7 @@
 import datetime
 import json
 import math
-from typing import Dict, Optional, Set
+from typing import Dict, Iterable, Optional, Set
 
 import geojson
 import s2sphere
@@ -36,6 +36,29 @@ class Volume4(object):
     self.altitude_hi = altitude_hi
     self.cells = cells
 
+  def contains(self, other) -> bool:
+    assert isinstance(other, Volume4)
+    if (other.altitude_lo < self.altitude_lo or
+        other.altitude_hi > self.altitude_hi or
+        other.time_start < self.time_start or
+        other.time_end > self.time_end):
+      return False
+    return s2sphere.CellUnion(self.cells).contains(s2sphere.CellUnion(other.cells))
+
+
+def combine_volume4s(vol4s: Iterable[Volume4]) -> Volume4:
+  union = None
+  for vol4 in vol4s:
+    if union is None:
+      union = Volume4(vol4.time_start, vol4.time_end, vol4.altitude_lo, vol4.altitude_hi, set(vol4.cells))
+    else:
+      union.time_start = vol4.time_start if vol4.time_start < union.time_start else union.time_start
+      union.time_end = vol4.time_end if vol4.time_end > union.time_end else union.time_end
+      union.altitude_lo = vol4.altitude_lo if vol4.altitude_lo < union.altitude_lo else union.altitude_lo
+      union.altitude_hi = vol4.altitude_hi if vol4.altitude_hi > union.altitude_hi else union.altitude_hi
+    union.cells = set.union(union.cells, vol4.cells)
+  return union
+
 
 def _get_altitude(alt_json: Dict) -> Optional[float]:
   if alt_json is None:
@@ -57,6 +80,18 @@ def _get_time(time_json: Dict) -> Optional[datetime.datetime]:
   if time_json.get('format', None) != 'RFC3339':
     raise ValueError('Incorrect `format` in time; expected RFC3339')
   return format_utils.parse_timestamp(time_json['value'])
+
+
+def overlaps_time_altitude(area_of_interest: Volume4, vol4: Volume4) -> bool:
+  if area_of_interest.time_start is not None and vol4.time_end < area_of_interest.time_start:
+    return False
+  if area_of_interest.time_end is not None and vol4.time_start > area_of_interest.time_end:
+    return False
+  if area_of_interest.altitude_lo is not None and vol4.altitude_hi < area_of_interest.altitude_lo:
+    return False
+  if area_of_interest.altitude_hi is not None and vol4.altitude_lo > area_of_interest.altitude_hi:
+    return False
+  return True
 
 
 def expand_volume4(extents: Dict, min_s2_level: int, max_s2_level: int) -> Volume4:

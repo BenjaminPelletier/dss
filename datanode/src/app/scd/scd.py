@@ -21,10 +21,13 @@ def Status():
 
 # Import declared endpoints
 from . import subscription_endpoints
+from . import operation_endpoints
 
 
 def handle_exception(e):
   if isinstance(e, errors.NotFoundError):
     return flask.jsonify({'message': e.message}), 404
+  elif isinstance(e, errors.NotOwnedError):
+    return flask.jsonify({'message': e.message}), 403
 
   return None

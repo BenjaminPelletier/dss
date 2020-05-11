@@ -45,6 +45,8 @@ def GetSubscription(id):
 def PutSubscription(id):
   subscription_id = uuid.UUID(id)
   existing_subscription = app.scd_storage.get_subscription(subscription_id)
+  if existing_subscription is not None and existing_subscription.owner != flask.request.jwt.client_id:
+    raise errors.NotOwnedError('Only the owner may modify a subscription')
   new_subscription = subscriptions.from_request(
     id, flask.request.json, flask.request.jwt.client_id, existing_subscription, webapp.config['SCD_GEO_CONFIG'])
   new_subscription.version += 1
@@ -62,8 +64,11 @@ def PutSubscription(id):
 @authorization.requires_scope([scopes.STRATEGIC_COORDINATION, scopes.CONSTRAINT_CONSUMPTION])
 def DeleteSubscription(id):
   subscription_id = uuid.UUID(id)
-  deleted_subscription = app.scd_storage.delete_subscription(subscription_id)
-  if deleted_subscription is not None:
-    return flask.jsonify({'subscription': deleted_subscription.to_dict()})
-  else:
+  old_subscription = app.scd_storage.get_subscription(subscription_id)
+  if old_subscription is None:
     raise errors.NotFoundError('Subscription not found')
+  if old_subscription.owner != flask.request.jwt.client_id:
+    raise errors.NotOwnedError('Only the owner may delete an subscription')
+  app.scd_storage.delete_subscription(subscription_id)
+
+  return flask.jsonify({'subscription_reference': old_subscription.to_dict()})
