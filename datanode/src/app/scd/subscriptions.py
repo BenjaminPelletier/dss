@@ -4,7 +4,7 @@ import re
 from typing import Dict, List, Iterable, Optional, Set, Tuple
 import uuid
 
-from app.lib import format_utils
+from app.dsslib import format_utils
 from app.scd import geo
 
 

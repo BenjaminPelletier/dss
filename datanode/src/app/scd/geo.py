@@ -6,7 +6,7 @@ from typing import Dict, Iterable, Optional, Set
 import geojson
 import s2sphere
 
-from app.lib import format_utils
+from app.dsslib import format_utils
 
 
 EARTH_CIRCUMFERENCE_M = 40.075e6
