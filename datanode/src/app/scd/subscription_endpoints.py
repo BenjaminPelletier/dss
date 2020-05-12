@@ -44,21 +44,24 @@ def GetSubscription(id):
 @authorization.requires_scope([scopes.STRATEGIC_COORDINATION, scopes.CONSTRAINT_CONSUMPTION])
 def PutSubscription(id):
   subscription_id = uuid.UUID(id)
+  caller = flask.request.jwt.client_id
   existing_subscription = app.scd_storage.get_subscription(subscription_id)
-  if existing_subscription is not None and existing_subscription.owner != flask.request.jwt.client_id:
+  if existing_subscription is not None and existing_subscription.owner != caller:
     raise errors.NotOwnedError('Only the owner may modify a subscription')
   new_subscription = subscriptions.from_request(
     id, flask.request.json, flask.request.jwt.client_id, existing_subscription, webapp.config['SCD_GEO_CONFIG'])
   new_subscription.version += 1
   app.scd_storage.upsert_subscription(new_subscription)
 
-  #TODO: find Operations and Constraints
+  result = {'subscription': new_subscription.to_dict()}
 
-  return flask.jsonify({
-    'subscription': new_subscription.to_dict(),
-    'operations': [],
-    'constraints': []
-  }), 200 if existing_subscription is not None else 201
+  if new_subscription.notify_for_operations:
+    operations = app.scd_storage.find_operations(new_subscription.vol4)
+    result['operations'] = [op.to_dict(include_ovn=op.owner == caller) for op in operations]
+
+  #TODO: find Constraints
+
+  return flask.jsonify(result), 200 if existing_subscription is not None else 201
 
 @webapp.route('/dss/v1/subscriptions/<id>', methods=['DELETE'])
 @authorization.requires_scope([scopes.STRATEGIC_COORDINATION, scopes.CONSTRAINT_CONSUMPTION])

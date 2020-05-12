@@ -43,7 +43,9 @@ class Volume4(object):
         other.time_start < self.time_start or
         other.time_end > self.time_end):
       return False
-    return s2sphere.CellUnion(self.cells).contains(s2sphere.CellUnion(other.cells))
+    my_union = s2sphere.CellUnion(self.cells)
+    other_union = s2sphere.CellUnion(other.cells)
+    return my_union.contains(other_union)
 
 
 def combine_volume4s(vol4s: Iterable[Volume4]) -> Volume4:

@@ -41,13 +41,14 @@ def make_key_pair() -> KeyPair:
   return KeyPair(private_key, public_key)
 
 
-def make_token(private_key: str, sub: str, scopes: str, issuer: str) -> str:
+def make_token(private_key: str, sub: str, scopes: str, issuer: str, aud: str) -> str:
   timestamp = int((datetime.utcnow() - _UNIX_EPOCH).total_seconds())
   payload = {
     'sub': sub,
     'nbf': timestamp - 1,
     'scope': scopes,
     'iss': issuer,
+    'aud': aud,
     'exp': timestamp + 3600,
     'jti': str(uuid.uuid4()),
   }

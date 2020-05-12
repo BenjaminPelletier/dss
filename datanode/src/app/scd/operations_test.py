@@ -22,6 +22,7 @@ class SCDOperationsTestCase(unittest.TestCase):
     test_utils.test_lock.acquire()
     cls.token_keypair = test_utils.make_key_pair()
     webapp.config['TOKEN_PUBLIC_KEY'] = app.auth.config.fix_key(cls.token_keypair.public_key).encode('utf-8')
+    webapp.config['TOKEN_AUDIENCE'] = 'example.com'
     def run_webapp():
       webapp.run(host='0.0.0.0', port=5002)
     cls.webapp_thread = threading.Thread(target=run_webapp, daemon=True)
@@ -32,7 +33,7 @@ class SCDOperationsTestCase(unittest.TestCase):
     test_utils.test_lock.release()
 
   def _make_headers(self, sub, scope):
-    token = test_utils.make_token(self.token_keypair.private_key, sub, scope, 'example.com')
+    token = test_utils.make_token(self.token_keypair.private_key, sub, scope, 'example.com', 'example.com')
     return {'Authorization': 'Bearer ' + token}
 
   def _isolated_operation_cycle(
@@ -155,6 +156,82 @@ class SCDOperationsTestCase(unittest.TestCase):
       mutated_operation,
       mutated_query
     )
+
+  def testTwoOperations_Simple(self):
+    op1_id = str(uuid.uuid4())
+    sub2_id = str(uuid.uuid4())
+    op2_id = str(uuid.uuid4())
+    headers1 = self._make_headers('uss1', 'utm.strategic_coordination')
+    headers2 = self._make_headers('uss2', 'utm.strategic_coordination')
+
+    op1 = {
+      "extents": [test_utils.make_vol4(
+        datetime.utcnow(), datetime.utcnow() + timedelta(seconds=90),
+        0, 3000,
+        circle=test_utils.make_circle(85, 0, 100))],
+      "state": "Accepted",
+      "uss_base_url": "https://uss1.com/utm",
+      "new_subscription": {
+        "uss_base_url": "https://uss1.com/utm",
+        "notify_for_constraints": False
+      }
+    }
+
+    sub2 = {
+      "extents": test_utils.make_vol4(
+        datetime.utcnow() - timedelta(seconds=1), datetime.utcnow() + timedelta(seconds=180),
+        0, 3000,
+        circle=test_utils.make_circle(85, 0, 300)),
+      "uss_base_url": "https://uss2.com/utm",
+      "notify_for_operations": True,
+      "notify_for_constraints": False
+    }
+
+    op2 = {
+      "extents": [test_utils.make_vol4(
+        datetime.utcnow(), datetime.utcnow() + timedelta(seconds=90),
+        0, 1000,
+        circle=test_utils.make_circle(85, 0, 150))],
+      "state": "Accepted",
+      "uss_base_url": "https://uss2.com/utm",
+    }
+
+    # Create op1
+    resp = requests.put(SCD_URL + '/dss/v1/operations/' + op1_id, headers=headers1, json=op1)
+    self.assertEqual(resp.status_code, 201, resp.content)
+    op1_created = resp.json()
+
+    # Establish area-based sub2
+    resp = requests.put(SCD_URL + '/dss/v1/subscriptions/' + sub2_id, headers=headers2, json=sub2)
+    self.assertEqual(resp.status_code, 201, resp.content)
+    sub2_created = resp.json()
+    self.assertEqual(len(sub2_created['operations']), 1)
+    self.assertEqual(sub2_created['operations'][0]['id'], op1_created['operation_reference']['id'])
+
+    # Create op2
+    op2['subscription_id'] = sub2_created['subscription']['id']
+    op2['key'] = [op1_created['operation_reference']['ovn']]
+    resp = requests.put(SCD_URL + '/dss/v1/operations/' + op2_id, headers=headers2, json=op2)
+    self.assertEqual(resp.status_code, 201, resp.content)
+    op2_created = resp.json()
+    subscribers = op2_created['subscribers']
+    self.assertEqual(len(subscribers), 2)
+    self.assertIn('https://uss1.com/utm', [sub['uss_base_url'] for sub in subscribers])
+    self.assertIn('https://uss2.com/utm', [sub['uss_base_url'] for sub in subscribers])
+
+    # Delete op1
+    resp = requests.delete(SCD_URL + '/dss/v1/operations/' + op1_id, headers=headers1)
+    self.assertEqual(resp.status_code, 200, resp.content)
+    op1_deleted = resp.json()
+    self.assertEqual(len(op1_deleted['subscribers']), 1)
+    self.assertEqual(op1_deleted['subscribers'][0]['uss_base_url'], 'https://uss2.com/utm')
+
+    # Delete op2
+    resp = requests.delete(SCD_URL + '/dss/v1/operations/' + op2_id, headers=headers2)
+    self.assertEqual(resp.status_code, 200, resp.content)
+    op1_deleted = resp.json()
+    self.assertEqual(len(op1_deleted['subscribers']), 1)
+    self.assertEqual(op1_deleted['subscribers'][0]['uss_base_url'], 'https://uss2.com/utm')
 
 
 if __name__ == '__main__':

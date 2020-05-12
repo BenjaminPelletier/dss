@@ -22,6 +22,7 @@ class SCDSubscriptionsTestCase(unittest.TestCase):
     test_utils.test_lock.acquire()
     cls.token_keypair = test_utils.make_key_pair()
     webapp.config['TOKEN_PUBLIC_KEY'] = app.auth.config.fix_key(cls.token_keypair.public_key).encode('utf-8')
+    webapp.config['TOKEN_AUDIENCE'] = 'example.com'
     def run_webapp():
       webapp.run(host='0.0.0.0', port=5001)
     cls.webapp_thread = threading.Thread(target=run_webapp, daemon=True)
@@ -32,7 +33,7 @@ class SCDSubscriptionsTestCase(unittest.TestCase):
     test_utils.test_lock.release()
 
   def _make_headers(self, sub, scope):
-    token = test_utils.make_token(self.token_keypair.private_key, sub, scope, 'example.com')
+    token = test_utils.make_token(self.token_keypair.private_key, sub, scope, 'example.com', 'example.com')
     return {'Authorization': 'Bearer ' + token}
 
   def _nominal_subscription_cycle(
