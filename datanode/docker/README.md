@@ -1,40 +1,16 @@
-# InterUSS Platform Docker deployment
+# DSS Docker deployment
 
 ## Introduction
 
-The contents of this folder enable the bring-up of a docker-compose system to
-host an InterUSS Platform data node in a single command.
+The contents of this folder enable the bring-up of a Docker-based system to
+host a DSS server with minimal effort.
 
 ## Contents
 
-### Dockerfile_storageapi
+### Dockerfile_dsslogic
 
-This Dockerfile builds an image containing the InterUSS Platform storage API. It
-requires a separate Zookeeper instance to operate.
-
-### docker-compose_storageapitest.yaml
-
-This docker-compose configuration tests the storage API image above by
-instantiating a storage API container along with a connected Zookeeper node in
-stand alone mode. With this system up, the InterUSS Platform storage API is
-exposed on localhost:INTERUSS_API_PORT.
-
-### Dockerfile_reverseproxy
-
-This Dockerfile builds an image containing an nginx reverse proxy intended to
-gate requests to the storage API and provide HTTPS access to the API.
-
-### docker-compose.yaml
-
-This docker-compose configuration brings up an entire InterUSS Platform data
-node in a single command.  By default, HTTP access to the API is available on
-port 8120 and HTTPS on 8121.
-
-### docker-compose_localssl.yaml
-
-By layering this docker-compose configuration on top of docker-compose.yaml,
-users may provide their own SSL certificates. This is the intended usage in
-production.
+This Dockerfile builds an image containing the DSS logic including HTTP
+interface.
 
 ## Test Usage
 

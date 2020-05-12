@@ -59,7 +59,10 @@ def requires_scope(permitted_scopes):
           public_key = webapp.config.get('TOKEN_PUBLIC_KEY', None)
           if not public_key:
             raise ConfigurationError('Public key for access tokens is not configured on server')
-          r = jwt.decode(token, public_key, algorithms='RS256')
+          aud = webapp.config.get('TOKEN_AUDIENCE', None)
+          if not aud:
+            raise ConfigurationError('Audience for access tokens is not configured on server')
+          r = jwt.decode(token, public_key, algorithms='RS256', audience=aud)
           provided_scopes = r['scope'].split(' ')
           has_scope = False
           for scope in permitted_scopes:

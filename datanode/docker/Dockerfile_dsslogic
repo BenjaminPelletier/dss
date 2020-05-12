@@ -1,0 +1,41 @@
+# Definition for Docker image that runs the DSS server.
+
+# To build an image from this Dockerfile, change to the root folder of this repo then:
+# docker image build -f ./datanode/docker/Dockerfile_dsslogic -t interuss/dsslogic ./datanode
+
+# To run this image:
+# docker run \
+#     -e INTERUSS_PUBLIC_KEY="${INTERUSS_PUBLIC_KEY}" \
+#     -e INTERUSS_TOKEN_AUDIENCE="${INTERUSS_TOKEN_AUDIENCE}" \
+#     -p 8081:8081 -d interuss/dsslogic
+
+# Or, if you are running the auth server locally in its demo configuration:
+# docker run -e INTERUSS_PUBLIC_KEY="http://localhost:8082/key" -e INTERUSS_TOKEN_AUDIENCE="localhost" -p 8081:8081 -d interuss/dsslogic
+
+# Required environment variables:
+#   INTERUSS_PUBLIC_KEY: Public key to validate access tokens.
+#   INTERUSS_TOKEN_AUDIENCE: Value that must be present in `aud` claim of access tokens
+
+# Optional environment variables:
+#   INTERUSS_API_PORT: Port on which the DSS API will be served (default 8081)
+#   INTERUSS_API_SERVER: IP address that will respond to DSS API requests (default 0.0.0.0)
+#   INTERUSS_VERBOSE: True for more log messages from the DSS (default true)
+
+FROM python:3
+
+WORKDIR /usr/src/app
+
+COPY ./src/requirements.txt ./requirements.txt
+
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY ./src .
+
+ENV INTERUSS_API_SERVER 0.0.0.0
+ENV INTERUSS_API_PORT 8081
+ENV INTERUSS_VERBOSE true
+
+CMD gunicorn app:webapp -b ${INTERUSS_API_SERVER}:${INTERUSS_API_PORT} --access-logfile -
+# CMD [ "python", "./storage_api.py" ]
+
+EXPOSE $INTERUSS_API_PORT
