@@ -1,19 +1,4 @@
-"""Test of the InterUSS Platform auth server.
-
-Copyright 2018 Google LLC
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    https://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-"""
+"""Test of the InterUSS Platform auth server."""
 from datetime import datetime
 import hashlib
 import json
@@ -54,12 +39,11 @@ class InterUSSAuthServerTestCase(unittest.TestCase):
       'myuss.com': 'uss',
       'other.com': 'other',
     }
-    scopes = ' '.join(('interussplatform.com_operators.read',
-                       'interussplatform.com_operators.write'))
+    scopes = ' '.join(('interuss.org_operators.read',
+                       'interuss.org_operators.write'))
     with open(roster_file, 'w') as f:
       for username, password in cls.users.items():
-        password_hash = hashlib.sha256(
-          'InterUSS Platform %s %s' % (username, password)).hexdigest()
+        password_hash = hashlib.sha256(('InterUSS Project %s %s InterUSS Project' % (username, password)).encode('utf-8')).hexdigest()
         f.write(','.join((username, password_hash, scopes)) + '\n')
 
     os.environ['INTERUSS_AUTH_SERVER'] = '127.0.0.1'
@@ -94,17 +78,20 @@ class InterUSSAuthServerTestCase(unittest.TestCase):
 
   def testMissingAuthorization(self):
     result = requests.post(BASE_URL + '/oauth/token',
-                           {'grant_type': 'client_credentials'})
+                           {'grant_type': 'client_credentials',
+                            'aud': 'receiver.com'})
     self.assertEqual(401, result.status_code)
 
   def testBadAuthorization(self):
     result = requests.post(BASE_URL + '/oauth/token',
-                           {'grant_type': 'client_credentials'},
+                           {'grant_type': 'client_credentials',
+                            'aud': 'receiver.com'},
                            auth=('myuss.com', 'wrong'))
     self.assertEqual(401, result.status_code)
 
     result = requests.post(BASE_URL + '/oauth/token',
-                           {'grant_type': 'client_credentials'},
+                           {'grant_type': 'client_credentials',
+                            'aud': 'receiver.com'},
                            auth=('nonexistent', 'uss'))
     self.assertEqual(401, result.status_code)
 
@@ -114,9 +101,10 @@ class InterUSSAuthServerTestCase(unittest.TestCase):
 
   def testNormalUsage(self):
     result = requests.post(BASE_URL + '/oauth/token',
-                           {'grant_type': 'client_credentials'},
+                           {'grant_type': 'client_credentials',
+                            'aud': 'receiver.com'},
                            auth=('myuss.com', 'uss'))
-    self.assertEqual(200, result.status_code)
+    self.assertEqual(200, result.status_code, result.content)
     jresult = json.loads(result.content)
     access_token = jresult['access_token']
 
@@ -124,14 +112,14 @@ class InterUSSAuthServerTestCase(unittest.TestCase):
     self.assertEqual(200, result.status_code)
     public_key = result.content
 
-    r = jwt.decode(access_token, public_key, algorithms='RS256')
+    r = jwt.decode(access_token, public_key, algorithms='RS256', audience='receiver.com')
     self.assertEqual('myuss.com', r['client_id'])
     now_timestamp = int(
       (datetime.utcnow() - datetime.utcfromtimestamp(0)).total_seconds())
     self.assertGreater(r['exp'], now_timestamp)
-    self.assertItemsEqual(r['scope'],
-                          ('interussplatform.com_operators.read',
-                           'interussplatform.com_operators.write'))
+    self.assertSetEqual(set(r['scope'].split(' ')),
+                        {'interuss.org_operators.read',
+                         'interuss.org_operators.write'})
 
     time.sleep(3)
     self.assertRaises(jwt.ExpiredSignatureError,

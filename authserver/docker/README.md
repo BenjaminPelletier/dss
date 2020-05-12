@@ -9,20 +9,18 @@ host an InterUSS Platform auth server in a single command.
 
 ### Dockerfile_authserver
 
-This Dockerfile builds an image containing the InterUSS Platform auth server serving via HTTP. It is
-insecure to use this auth server by itself because users authenticate with Basic authentication, so
-passwords are sent in the clear without an HTTPS wrapper.
+This Dockerfile builds an image containing a simple auth server serving via
+HTTP. It is insecure to use this auth server by itself because users
+authenticate with Basic authentication, so passwords are sent in the clear
+without an HTTPS wrapper.
 
-### Dockerfile_authreverseproxy
+### private.pem & public.pem
 
-This Dockerfile builds an image containing an nginx reverse proxy intended to
-gate requests and to the provide HTTPS access to the auth server.
+This is an example keypair generated via the method described in "Access token key pair" below for the purpose of expediting the ability to run a test instance.
 
-### docker-compose.yaml
+### roster.txt
 
-This docker-compose configuration brings up an entire InterUSS Platform auth server in a single
-command (after supplying the required resources).  By default, HTTPS access to the server is
-available on port 8121.
+This is an example roster of users (and passwords) for the purpose of expediting the ability to run and use a test instance.
 
 ## Running an auth server
 
@@ -50,12 +48,12 @@ folder as the key pair above and populate it with one line per user.  Each line 
 the user's username, their hashed password, and the scopes they are to be granted, each of those
 three fields separated by commas (and be careful to eliminate whitespace).  The scopes should be
 separated by spaces.  The hashed password is the SHA256 hash of
-`InterUSS Platform USERNAME PASSWORD`.  So, if user `wing.com` had password `wing`, their hashed
-password would be SHA256(InterUSS Platform wing.com wing), which begins b03ed6.  To compute the
+`InterUSS Project USERNAME PASSWORD InterUSS Project`.  So, if user `example.com` had password `example`, their hashed
+password would be SHA256(InterUSS Project example.com example InterUSS Project), which begins 32a43c.  To compute the
 SHA256 hash on a Linux command line:
 
 ```shell
-echo -n "InterUSS Platform wing.com wing" | openssl dgst -sha256
+echo -n "InterUSS Project example.com example InterUSS Project" | openssl dgst -sha256
 ```
 
 Or, use an online SHA256 generator like https://www.xorbin.com/tools/sha256-hash-calculator, but
@@ -64,29 +62,23 @@ this is less secure because the website may gain access to the password.
 When enrolling a user, it is best to have them choose their password and only send you their hashed
 password so the password itself is never stored in email servers.
 
-An example roster.txt may look like this:
+The example roster in this repository contains the following users:
 
-```
-wing.com,b03ed640ce1aed7f1dd9558c9312918b944496937e4fe81db1a3d9968a7ee1d0,interussplatform.com_operators.read interussplatform.com_operators.write
-otheruss.com,97b30e68738f0a7daebb94862da7baf4dbffa5913ac57b91ea33b33baee26573,interussplatform.com_operators.read interussplatform.com_operators.write
-```
+STRATEGIC_COORDINATION = 'utm.strategic_coordination'
+CONSTRAINT_CONSUMPTION = 'utm.constraint_consumption'
+CONSTRAINT_MANAGEMENT = 'utm.constraint_management'
 
-#### SSL certificate
-
-It does not make sense to run an auth server over HTTP, so SSL certificates must be provided.
-Ideally, these would come from a certificate authority, but a self-signed certificate can be
-generated with these commands:
-
-```shell
-mkdir certs
-mkdir private
-openssl req -x509 -newkey rsa:4096 -nodes -out certs/cert.pem -keyout private/key.pem -days 365
-```
-
-Note that self-signed certificates do not guarantee the identity of the remote
-host. To be fully secure, the certificate must be signed by a trusted
-certificate authority, and that certificate will only be valid on the host for
-which it was signed.
+| username    | password | utm.strategic_coordination | utm.constraint_consumption | utm.constraint_management |
+|-------------|----------|----------------------------|----------------------------|---------------------------|
+| uss1        | uss1     | X                          | X                          | X                         |
+| uss2        | uss2     | X                          | X                          | X                         |
+| uss3        | uss3     | X                          | X                          | X                         |
+| example.com | example  | X                          | X                          | X                         |
+| planner1    | planner1 | X                          |                            |                           |
+| planner2    | planner2 | X                          |                            |                           |
+| planner3    | planner3 | X                          |                            |                           |
+| info_uss    | info     |                            | X                          |                           |
+| safety_uss  | safety   |                            |                            | X                         |
 
 ### Running
 

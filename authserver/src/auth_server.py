@@ -33,7 +33,6 @@ from flask import Flask
 from flask import jsonify
 from flask import request
 import jwt
-from rest_framework import status
 
 VERSION = '0.1.0.000'  # Initial draft/demo release
 
@@ -48,7 +47,7 @@ Configuration = collections.namedtuple(
 
 
 _UNIX_EPOCH = datetime.datetime.utcfromtimestamp(0)
-_SALT = 'InterUSS Platform'
+_SALT = 'InterUSS Project'
 
 
 # Environment variable names for various parameters:
@@ -65,7 +64,6 @@ _KEY_EXPIRATION = 'INTERUSS_AUTH_EXPIRATION'
 @webapp.route('/', methods=['GET'])
 @webapp.route('/status', methods=['GET'])
 def Status():
-  # Just a quick status checker.
   log.debug('Status handler instantiated...')
   return jsonify({
     'status': 'success',
@@ -99,42 +97,55 @@ def TokenHandler():
   log.debug('Token handler instantiated...')
 
   # Verify grant_type
-  if 'grant_type' not in request.args and 'grant_type' not in request.form:
-    abort(status.HTTP_400_BAD_REQUEST, jsonify({
-      "error": "invalid_request",
-      "error_description": "Missing grant type"
-    }))
-
-  grant_type = (request.args['grant_type'] if 'grant_type' in request.args
-                else request.form['grant_type'])
+  grant_type = _get_argument('grant_type')
   if grant_type != 'client_credentials':
-    abort(status.HTTP_400_BAD_REQUEST, jsonify({
+    return jsonify({
       "error": "unsupported_grant_type",
       "error_description": "Unsupported grant type: " + grant_type
-    }))
+    }), 400
+
+  # Retrieve intended audience
+  aud = _get_argument('aud')
+  if not aud:
+    return jsonify({
+      "error": "missing_aud",
+      "error_description": "Missing `aud` parameter"
+    })
 
   # Authorize user
   auth = request.authorization
   if not auth:
-    abort(status.HTTP_401_UNAUTHORIZED, jsonify({
+    return jsonify({
       "error": "authorization_header_missing",
       "error_description": 'Authorization header missing'
-    }))
+    }), 401
 
   if auth.username not in config.users:
-    abort(status.HTTP_401_UNAUTHORIZED, jsonify({
+    return jsonify({
       "error": "invalid_login",
       "error_description": 'Username or password not recognized'
-    }))
+    }), 401
   user = config.users[auth.username]
 
-  password_hash = hashlib.sha256(
-    _SALT + ' ' + auth.username + ' ' + auth.password).hexdigest()
+  password_hash = hashlib.sha256((_SALT + ' ' + auth.username + ' ' + auth.password + ' ' + _SALT).encode('utf-8')).hexdigest()
   if password_hash != user.hashed_password:
-    abort(status.HTTP_401_UNAUTHORIZED, jsonify({
+    return jsonify({
       "error": "invalid_login",
       "error_description": 'Username or password not recognized'
-    }))
+    }), 401
+
+  # Retrieve requested scope(s)
+  requested_scopes = _get_argument('scope')
+  if requested_scopes:
+    requested_scopes = requested_scopes.split(' ')
+    for requested_scope in requested_scopes:
+      if requested_scope not in user.scopes:
+        return jsonify({
+          "error": "scope_not_allowed",
+          "error_description": "Scope %s not available for this user" % requested_scope
+        }), 403
+  else:
+    requested_scopes = user.scopes
 
   # Create access_token
   timestamp = int((datetime.datetime.utcnow() - _UNIX_EPOCH).total_seconds())
@@ -142,38 +153,42 @@ def TokenHandler():
 
   payload = {
     'sub': auth.username,
+    'client_id': auth.username,
     'nbf': timestamp - 1,
-    'scope': user.scopes,
+    'scope': ' '.join(requested_scopes),
     'iss': config.issuer,
     'exp': timestamp + config.expiration,
     'jti': jti,
-    'client_id': auth.username,
+    'aud': aud
   }
 
   access_token = jwt.encode(payload, key=config.private_key, algorithm='RS256')
 
   # Make sure the token validates correctly
   try:
-    jwt.decode(access_token, config.public_key, algorithms='RS256')
+    jwt.decode(access_token, config.public_key, algorithms='RS256', audience=aud)
   except jwt.ExpiredSignatureError as e:
     log.error('Generated access token has already expired: ' + str(e))
-    abort(status.HTTP_500_INTERNAL_SERVER_ERROR,
-          'Encountered ExpiredSignatureError when validating generated token')
+    return 'Encountered ExpiredSignatureError when validating generated token', 500
   except jwt.DecodeError as e:
     log.error('Generated access token could not be decoded: ' + str(e))
-    abort(status.HTTP_500_INTERNAL_SERVER_ERROR,
-          'Generated access token could not be decoded for validation')
+    return 'Generated access token could not be decoded for validation', 500
 
   return jsonify({
-    'access_token': access_token,
+    'access_token': access_token.decode('utf-8'),
     'token_type': "bearer",
     'expires_in': config.expiration - 1,
-    'scope': ' '.join(payload['scope']),
+    'scope': payload['scope'],
     'sub': payload['sub'],
     'nbf': payload['nbf'],
     'iss': payload['iss'],
     'jti': payload['jti'],
   })
+
+
+def _get_argument(arg_name):
+  return (request.args[arg_name] if arg_name in request.args
+          else request.form.get(arg_name, None))
 
 
 def ParseOptions(argv):
@@ -239,12 +254,9 @@ def ParseOptions(argv):
     default=os.getenv(_KEY_ROSTER, None),
     help='Name of file containing lines of\nUSERNAME,HASHED PASSWORD,SCOPES\n'
          'where USERNAME is the domain name of the user, HASHED PASSWORD is '
-         '(the SHA256 hash of "InterUSS Platform USERNAME PASSWORD" (so, for '
-         'instance, if wing.com\'s password were "wing", its HASHED PASSWORD '
-         'would be SHA256(InterUSS Platform wing.com wing) which begins '
-         'b03ed6. Generate this hash at a Linux command line with `echo -n '
-         '"InterUSS Platform wing.com wing" | openssl dgst -sha256` Scopes '
-         'should be separated by spaces [or use env variable %s]' % _KEY_ROSTER,
+         '(the SHA256 hash of "InterUSS Project USERNAME PASSWORD InterUSS '
+         'Project"  See the README for more details.  Scopes should be '
+         'separated by spaces [or use env variable %s]' % _KEY_ROSTER,
     metavar='FILENAME')
   parser.add_option(
     '-i',
