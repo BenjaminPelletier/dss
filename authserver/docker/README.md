@@ -64,10 +64,6 @@ password so the password itself is never stored in email servers.
 
 The example roster in this repository contains the following users:
 
-STRATEGIC_COORDINATION = 'utm.strategic_coordination'
-CONSTRAINT_CONSUMPTION = 'utm.constraint_consumption'
-CONSTRAINT_MANAGEMENT = 'utm.constraint_management'
-
 | username    | password | utm.strategic_coordination | utm.constraint_consumption | utm.constraint_management |
 |-------------|----------|----------------------------|----------------------------|---------------------------|
 | uss1        | uss1     | X                          | X                          | X                         |
@@ -79,26 +75,3 @@ CONSTRAINT_MANAGEMENT = 'utm.constraint_management'
 | planner3    | planner3 | X                          |                            |                           |
 | info_uss    | info     |                            | X                          |                           |
 | safety_uss  | safety   |                            |                            | X                         |
-
-### Running
-
-To run a fully-functional InterUSS Platform auth server from the folder containing the resources
-above:
-
-```shell
-export INTERUSS_AUTH_PATH=`pwd`
-export SSL_CERT_PATH=`pwd`/certs
-export SSL_KEY_PATH=`pwd`/private
-export INTERUSS_AUTH_ISSUER=yourdomain.com
-cd /path/to/this/folder
-docker-compose -p authserver up
-```
-
-To verify operation, navigate a browser to https://localhost:8121/status
-
-To make sure you have the latest versions, first run:
-
-```shell
-docker pull interussplatform/auth_server
-docker pull interussplatform/auth_reverse_proxy
-```
