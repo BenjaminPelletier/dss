@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>New Operation</h1>
+<form action="" method="POST" enctype="multipart/form-data">
+  <p>
+    {{ form.descriptor }}
+  </p>
+  <input type="submit" value="Create">
+</form>
+<h1>Existing Operations</h1>
+<ul>
+  {% for op in ops %}
+    <li><a href="{{ url_for('operation', id=op.id) }}">{{ op.id }}</a></li>
+  {% endfor %}
+</ul>
+{% endblock %}
