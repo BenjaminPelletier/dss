@@ -3,7 +3,11 @@ import uuid
 import flask
 import flask_login
 
-from monitoring.simuss import webapp
+from monitoring.monitorlib import scd
+from monitoring.monitorlib import fetch
+import monitoring.monitorlib.fetch.scd
+from monitoring.simuss import db, webapp
+from monitoring.simuss.auth import authorization
 from . import forms, validate
 from .operation import reference_request_from_descriptor
 
@@ -28,7 +32,7 @@ def operations():
           op_req = reference_request_from_descriptor(op_descriptor)
 
           # Query the DSS for other Operations
-
+          fetch.scd.operations()
 
           # Query the DSS for other Constraints
 
@@ -56,3 +60,23 @@ def operation(id: str):
     raise NotImplementedError()
   op = op_model.to_operation()
   return flask.render_template('operation.html', title='Operation', form=form, op=op)
+
+
+@webapp.route('uss/v1/operations/{id}', methods=['GET'])
+@authorization.requires_scope(scd.SCOPE_SC)
+def operation_details(id: str):
+  op = db.get(db.TABLE_OPERATIONS, id)
+  if op is None:
+    flask.abort(404, 'Could not find requested Operation')
+  return flask.jsonify(op)
+
+
+@webapp.route('uss/v1/operations/{id}', methods=['GET'])
+@authorization.requires_scope(scd.SCOPE_SC)
+def operation_notification(id: str):
+  try:
+    op = flask.request.json
+  except ValueError:
+    flask.abort(400, 'No JSON body found')
+  db.put(db.TABLE_OPERATION_NOTIFICATIONS, id, op)
+  return '', 204

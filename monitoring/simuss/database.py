@@ -7,6 +7,9 @@ import yaml
 
 
 class Database(object):
+  TABLE_OPERATIONS = 'operations'
+  TABLE_OPERATION_NOTIFICATIONS = 'operation_notifications'
+
   def __init__(self, db_path: str):
     self.db_path = db_path
 
