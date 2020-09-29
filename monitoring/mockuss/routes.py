@@ -3,8 +3,8 @@ import flask_login
 from werkzeug.exceptions import HTTPException
 
 from monitoring.monitorlib import versioning
-from monitoring.simuss import webapp
-from monitoring.simuss.auth import authorization
+from monitoring.mockuss import webapp
+from monitoring.mockuss.auth import authorization
 
 
 @webapp.route('/')
@@ -41,6 +41,4 @@ def status():
 
 
 from .user import routes
-#from .flight_plans import routes
-#from .orbit_flights import routes
-from .operations import routes
+from .constraints import routes

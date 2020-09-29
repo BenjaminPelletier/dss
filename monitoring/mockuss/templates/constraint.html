@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+
+{% macro collapseable(v) %}{% if v is mapping or (v is iterable and v is not string) %}collapseable{% else %}not_collapseable{% endif %}{% endmacro %}
+
+{% macro draw_value(v) %}
+{% if v is mapping %}
+{{ draw_node(v) }}
+{% elif v is string %}
+{{ v }}
+{% elif v is iterable %}
+{{ draw_list(v) }}
+{% else %}
+{{ v }}
+{% endif %}
+{% endmacro %}
+
+{% macro draw_node(node) %}
+<ul>
+  {% for k, v in node.items() %}
+  <li class="{{ collapseable(v) }}">
+    <div class="node_key">{{ k }}</div>:
+    <div class="node_value">{{ draw_value(v) }}</div>
+  </li>
+  {% endfor %}
+</ul>
+{% endmacro %}
+
+{% macro draw_list(items) %}
+<ul>
+  {% for v in items %}
+  <li class="{{ collapseable(v) }}">
+    <div class="node_key">item_{{ loop.index }}</div>:
+    <div class="node_value">{{ draw_value(v) }}</div>
+  </li>
+  {% endfor %}
+</ul>
+{% endmacro %}
+
+{% block content %}
+<style>
+  ul, ul ul, ul li {
+    margin: 0;
+    padding: 0;
+    list-style-type: none;
+  }
+  ul ul { padding-left: 0.3em; }
+  ul li {
+    padding-left: 14px;
+  }
+  li div {
+    display: inline;
+  }
+  .collapseable>.node_key:hover {
+    text-decoration: underline;
+    cursor: pointer;
+  }
+  .collapsed>.node_key {
+    color: red;
+  }
+  .node_key {
+    font-weight: bold;
+  }
+</style>
+<script>
+  function showHide(node) {
+    var value = node.querySelector(".node_value");
+    if (node.classList.contains("collapsed")) {
+      node.classList.remove("collapsed");
+      for (var i = 0; i < value.children.length; i++) {
+        value.children[i].style.display = "block";
+      }
+    } else {
+      node.classList.add("collapsed");
+      for (var i = 0; i < value.children.length; i++) {
+        value.children[i].style.display = "none";
+      }
+    }
+  }
+
+  function addShowHide(node) {
+    if (node.classList.contains("collapseable")) {
+      let key = node.querySelector(".node_key");
+      key.addEventListener("click", function () { showHide(node); });
+      let values = node.querySelector(".node_value ul");
+      if (values.children.length > 3) {
+        showHide(node);
+      }
+    }
+    for (var i = 0; i < node.children.length; i++) {
+      addShowHide(node.children[i]);
+    }
+  }
+</script>
+<h1>Constraint {{ constraint_id }}</h1>
+{% if constraint %}
+  <div id="constraint">
+    {{ draw_node(constraint) }}
+  </div>
+  <script>
+    addShowHide(document.getElementById("constraint"));
+  </script>
+  <form action="" method="post" enctype="multipart/form-data">
+    <input type="hidden" name="verb" value="DELETE">
+    <input type="submit" value="Delete">
+  </form>
+{% endif %}
+{% if constraint_ref %}
+  <span>Constraint is not owned by this USS</span>
+  <div id="constraint_ref">
+    {{ draw_node(constraint_ref) }}
+  </div>
+  <script>
+    addShowHide(document.getElementById("constraint_ref"));
+  </script>
+  <form action="" method="post" enctype="multipart/form-data">
+    <input type="hidden" name="verb" value="DELETE">
+    <input type="submit" value="Delete">
+  </form>
+{% endif %}
+<form action="" method="post" enctype="multipart/form-data">
+  <input type="hidden" name="verb" value="PUT">
+  <p>
+    <span>{{ form.descriptor.label }} {{ form.descriptor }}</span>
+  </p>
+  <input type="submit" value="{{ 'Update' if constraint else 'Create' }}">
+</form>
+{% endblock %}

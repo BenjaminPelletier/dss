@@ -3,7 +3,7 @@ from typing import Optional
 import flask_login
 from werkzeug.security import generate_password_hash, check_password_hash
 
-from monitoring.simuss import login_manager, webapp
+from monitoring.mockuss import login_manager, webapp
 
 
 class User(flask_login.UserMixin):

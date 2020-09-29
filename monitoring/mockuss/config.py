@@ -2,6 +2,21 @@ import os
 import random
 
 
+ENV_KEY_PREFIX = 'MOCKUSS'
+ENV_KEY_BASE_URL = '{}_BASE_URL'.format(ENV_KEY_PREFIX)
+ENV_KEY_AUTH = '{}_AUTH_SPEC'.format(ENV_KEY_PREFIX)
+ENV_KEY_DSS = '{}_DSS_URL'.format(ENV_KEY_PREFIX)
+ENV_KEY_DATABASE_PATH = '{}_DATABASE_PATH'.format(ENV_KEY_PREFIX)
+
+# These keys map to entries in the Config class
+KEY_SECRET_KEY = 'SECRET_KEY'
+KEY_ADMIN_PASSWORD = 'ADMIN_PASSWORD'
+KEY_BASE_URL = 'USS_BASE_URL'
+KEY_DATABASE_PATH = 'DATABASE_PATH'
+KEY_AUTH_SPEC = 'AUTH_SPEC'
+KEY_DSS_URL = 'DSS_URL'
+
+
 workspace_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'workspace')
 
 
@@ -31,8 +46,10 @@ class Config(object):
   SECRET_KEY = _get_secret_key()
   ADMIN_PASSWORD = _get_admin_password()
 
-  USS_BASE_URL = os.environ['USS_BASE_URL']
+  USS_BASE_URL = os.environ[ENV_KEY_BASE_URL]
+  AUTH_SPEC = os.environ[ENV_KEY_AUTH]
+  DSS_URL = os.environ[ENV_KEY_DSS]
 
-  DATABASE_PATH = os.environ.get('USS_DATABASE_PATH', workspace_path)
+  DATABASE_PATH = os.environ.get(ENV_KEY_DATABASE_PATH, workspace_path)
 
   WTF_CSRF_ENABLED = False # Can re-enable once nested forms pass CSRF validation

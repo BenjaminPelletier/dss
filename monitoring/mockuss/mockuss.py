@@ -1,6 +1,6 @@
 import sys
 
-from monitoring.simuss import webapp
+from monitoring.mockuss import webapp
 
 
 def main(argv):

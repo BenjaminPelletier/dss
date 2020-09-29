@@ -80,6 +80,64 @@ def _entity_references(dss_resource_name: str,
   return entity_references
 
 
+class FetchedEntityReference(fetch.Query):
+  """Wrapper to interpret a DSS Entity query as a single Entity reference."""
+
+  @property
+  def success(self) -> bool:
+    return self.error is None
+
+  @property
+  def entity_type(self) -> str:
+    return self['entity_type']
+
+  @property
+  def id(self) -> str:
+    return self['id']
+
+  @property
+  def key(self) -> str:
+    return self.entity_type
+
+  @property
+  def missing(self) -> bool:
+    return self.status_code == 404
+
+  @property
+  def reference(self) -> Dict:
+    return self.json_result[self.key]
+
+  @property
+  def error(self) -> Optional[str]:
+    # Handle any errors
+    op_description = 'get {} {}'.format(self.entity_type, self.id)
+    if self.status_code != 200:
+      return 'Failed to {} in DSS ({})'.format(op_description, self.status_code)
+    if self.json_result is None:
+      return 'DSS response to {} was not valid JSON'.format(op_description)
+    if self.key not in self.json_result:
+      return 'DSS response to {} did not contain {} key'.format(op_description, self.key)
+    entity_ref = self.json_result[self.key]
+    if 'ovn' not in entity_ref:
+      return 'DSS response to {} did not include ovn'.format(op_description)
+    if 'version' not in entity_ref:
+      return 'DSS response to {} did not include version'.format(op_description)
+    return None
+yaml.add_representer(FetchedEntityReferences, Representer.represent_dict)
+
+
+def _entity_reference(dss_resource_name: str,
+                      utm_client: infrastructure.DSSTestSession,
+                      id: str) -> FetchedEntityReference:
+  # Query DSS for Entity with specified ID
+  url = '/dss/v1/{}s/{}'.format(dss_resource_name, id)
+  entity_reference = FetchedEntityReference(fetch.query_and_describe(
+    utm_client, 'GET', url, scope=scd.SCOPE_SC))
+  entity_reference['entity_type'] = dss_resource_name
+  entity_reference['id'] = id
+  return entity_reference
+
+
 class FetchedEntity(fetch.Query):
   @property
   def success(self) -> bool:
@@ -276,6 +334,11 @@ def constraints(utm_client: infrastructure.DSSTestSession,
   return _entities(
     'constraint_references', 'constraint',
     utm_client, area, start_time, end_time, alt_min_m, alt_max_m, constraint_cache)
+
+
+def constraint_reference(utm_client: infrastructure.DSSTestSession,
+                         id: str) -> FetchedEntityReference:
+  return _entity_reference('constraint_reference', utm_client, id)
 
 
 class FetchedSubscription(fetch.Query):

@@ -2,7 +2,7 @@ import flask
 import flask_login
 from werkzeug.urls import url_parse
 
-from monitoring.simuss import webapp
+from monitoring.mockuss import webapp
 from . import forms, models
 
 

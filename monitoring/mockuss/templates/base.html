@@ -12,7 +12,6 @@
   <div>
     SimUSS:
     <a href="{{ url_for('index') }}">Home</a>
-    <a href="{{ url_for('operations') }}">Operations</a>
     {% if current_user.is_anonymous %}
       <a href="{{ url_for('login') }}">Log in</a>
     {% else %}

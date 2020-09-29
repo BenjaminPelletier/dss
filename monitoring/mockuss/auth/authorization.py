@@ -4,7 +4,8 @@ import logging
 import flask
 import jwt
 
-from monitoring.simuss import webapp
+from monitoring.mockuss import webapp
+from . import config
 
 
 logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.INFO)
@@ -56,10 +57,10 @@ def requires_scope(permitted_scopes):
           raise InvalidAccessTokenError('Missing Authorization header')
         token = token.replace('Bearer ', '')
         try:
-          public_key = webapp.config.get('TOKEN_PUBLIC_KEY', None)
+          public_key = webapp.config.get(config.KEY_TOKEN_PUBLIC_KEY)
           if not public_key:
             raise ConfigurationError('Public key for access tokens is not configured on server')
-          aud = webapp.config.get('TOKEN_AUDIENCE', None)
+          aud = webapp.config.get(config.KEY_TOKEN_AUDIENCE)
           if not aud:
             raise ConfigurationError('Audience for access tokens is not configured on server')
           r = jwt.decode(token, public_key, algorithms='RS256', audience=aud)

@@ -118,3 +118,19 @@ class Subscription(dict):
   @property
   def version(self) -> Optional[int]:
     return self.get('version', None)
+
+
+class EntityReference(dict):
+  @property
+  def valid(self) -> bool:
+    if self.version is None or self.ovn is None:
+      return False
+    return True
+
+  @property
+  def version(self) -> Optional[int]:
+      return self.get('version', None)
+
+  @property
+  def ovn(self) -> Optional[str]:
+      return self.get('ovn', None)
