@@ -7,6 +7,7 @@ from pytimeparse.timeparse import timeparse
 import yaml
 from yaml.representer import Representer
 
+from monitoring.monitorlib import fetch
 import monitoring.monitorlib.mutate.scd
 
 
@@ -74,5 +75,15 @@ class Owned(dict):
 
   @property
   def dss(self) -> monitoring.monitorlib.mutate.scd.MutatedEntity:
-    return self['dss']
+    return fetch.coerce(self['dss'], monitoring.monitorlib.mutate.scd.MutatedEntity)
+
+  @property
+  def details(self) -> Details:
+    return fetch.coerce(self['uss']['details'], Details)
+
+  def get_constraint_body(self) -> Dict:
+    return {
+      'reference': self.dss.ref_result.reference,
+      'details': self.details,
+    }
 yaml.add_representer(Owned, Representer.represent_dict)

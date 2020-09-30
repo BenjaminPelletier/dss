@@ -26,6 +26,7 @@ def _get_secret_key():
     with open(secret_key_file, 'r') as f:
       return f.readline()
   secret_key = ''.join(random.choice('abcdefghijklmnopqrstuvwxyz') for _ in range(64))
+  os.makedirs(os.path.dirname(secret_key_file), exist_ok=True)
   with open(secret_key_file, 'w') as f:
     f.write(secret_key)
   return secret_key
@@ -37,6 +38,7 @@ def _get_admin_password():
     with open(admin_password_file, 'r') as f:
       return f.readline()
   admin_password = ''.join(random.choice('abcdefghijklmnopqrstuvwxyz0123456789') for _ in range(8))
+  os.makedirs(os.path.dirname(admin_password_file), exist_ok=True)
   with open(admin_password_file, 'w') as f:
     f.write(admin_password)
   return admin_password

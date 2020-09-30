@@ -108,21 +108,13 @@ def constraint_route(id: str):
 #   return flask.render_template('constraints.html', title='Constraints', form=form, ops=ops)
 
 
-@webapp.route('/uss/v1/constraints/{id}', methods=['GET'])
-@authorization.requires_scope(scd.SCOPE_SC)
+@webapp.route('/uss/v1/constraints/<id>', methods=['GET'])
+@authorization.requires_scope([scd.SCOPE_SC, scd.SCOPE_CI])
 def constraint_details(id: str):
-  op = db.get(db.TABLE_OPERATIONS, id)
-  if op is None:
+  raw = db.get(db.TABLE_CONSTRAINTS, id)
+  if raw is None:
     flask.abort(404, 'Could not find requested Constraint')
-  return flask.jsonify(op)
-
-
-@webapp.route('/uss/v1/constraints/{id}', methods=['GET'])
-@authorization.requires_scope(scd.SCOPE_SC)
-def constraint_notification(id: str):
-  try:
-    op = flask.request.json
-  except ValueError:
-    flask.abort(400, 'No JSON body found')
-  db.put(db.TABLE_OPERATION_NOTIFICATIONS, id, op)
-  return '', 204
+  owned_constraint = constraint.Owned(raw)
+  return flask.jsonify({
+    'constraint': owned_constraint.get_constraint_body(),
+  })
