@@ -249,6 +249,11 @@ def favicon():
   flask.abort(404)
 
 
+@webapp.route('/kml/now.kml')
+def kml_now():
+  return flask.Response('', mimetype='application/vnd.google-earth.kml+xml')
+
+
 @webapp.route('/<path:u_path>', methods=['GET', 'PUT', 'POST', 'DELETE'])
 def catch_all(u_path) -> Tuple[str, int]:
   req = fetch.describe_flask_request(flask.request)

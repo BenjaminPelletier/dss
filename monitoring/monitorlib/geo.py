@@ -1,3 +1,4 @@
+import requests
 import s2sphere
 
 
@@ -26,3 +27,21 @@ def _validate_lng(lng: str) -> float:
   if lng < -180 or lng > 180:
     raise ValueError('Longitude must be in [-180, 180] range')
   return lng
+
+
+def get_egm96_offset(lat: float, lng: float) -> float:
+  # From https://earth-info.nga.mil/GandG/update/index.php?dir=wgs84&action=egm96-geoid-calc
+
+  url = 'https://earth-info.nga.mil/nga-bin/gandg-bin/egm96-calc.cgi'
+  body = {
+    'LatitudeDeg': str(lat),
+    'LongitudeDeg': str(lng),
+    'Units': 'meters',
+    'LatitudeMin': '',
+    'LongitudeMin': '',
+    'LatitudeSec': '',
+    'LongitudeSec': '',
+  }
+  resp = requests.post(url, data=body)
+  resp.raise_for_status()
+  return float(resp.content.decode('utf-8').split(' ')[0])
