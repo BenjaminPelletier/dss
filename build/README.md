@@ -140,8 +140,8 @@ a PR to that effect would be greatly appreciated.
     variable for convenience: `export NAMESPACE=<your namespace>`.
     
 1.  Create static IP addresses: one for the HTTPS Gateway's ingress, and one
-    for each CockroachDB node (minimum of 3) if you want to be able to join
-    other clusters.
+    for each CockroachDB node if you want to be able to interact with other
+    DSS instances.
 
     -  If using Google Cloud, the HTTPS Gateway ingress needs to be created as
        a "Global" IP address, but the CRDB ingresses as "Regional" IP addresses.
@@ -367,39 +367,9 @@ a PR to that effect would be greatly appreciated.
     
     `kubectl rollout restart statefulset/cockroachdb --namespace $NAMESPACE`
 
-## CockroachDB requirements
-These requirements must be met by every DSS instance joining a DSS Region.  The
-Kubernetes deployment instructions above produce a system that complies with all
-these requirements, so this section may be ignored if following those
-instructions.
+## Pooling
 
-- Every CockroachDB node must advertise a unique and routable address.
-  - The use of domain names with unique prefixes and homogenous suffixes, e.g.:
-    0.c.dss.interussplatform.com, is preferred as this allows wildcard usage in
-    the CRDB certificates.
-- Every DSS instance should run a minimum of 3 CockroachDB nodes, which
-  ensures enough nodes are always available to support failovers and gradual
-  rollouts.
-- At least 3 CockroacbDB addresses must be shared with all participants.
-  - If not using the recommended hostname prefix above, every CockroachDB
-    hostname must be shared with every participant.
-- Every DSS instance must supply and share their CockroachDB public
-  certificate.
-- All CockroachDB nodes must be run in secure mode, by supplying the
-  `--certs-dir` and `--ca-key` flags.
-  - Do not specify `--insecure`
-- The ordering of the `--locality` flag keys must be the same across all
-  CockroachDB nodes in the cluster.
-- All sharing must currently happen out of band.
-- All DSS instances in the same cluster must point their ntpd at the same NTP
-  Servers.
-  [CockroachDB recommends](https://www.cockroachlabs.com/docs/stable/recommended-production-settings.html#considerations)
-  using
-  [Google's Public NTP](https://developers.google.com/time/) when running in a
-  multi-cloud environment.
-
-Note: we are investigating the use of service mesh frameworks to alleviate some
-of this operational overhead.
+See [the pooling documentation](pooling.md).
 
 ## Tools
 
@@ -461,6 +431,10 @@ communicates on port 26257.  To check whether this port is open from Mac or
 Linux, e.g.: `nc -zvw3 0.db.dss.your-region.your-domain.com 26257`.  Or, search
 for a "port checker" web page/app.  Port 26257 will be open on a working
 CockroachDB node.
+
+A standard TLS diagnostic may also be run on this hostname:port combination and
+all results should be valid except Trust.  Certificates are signed by
+"Cockroach CA" which is not a generally-trusted CA, but this is ok.
 
 ### Accessing a CockroachDB SQL terminal
 
