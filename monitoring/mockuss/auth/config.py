@@ -25,6 +25,9 @@ def fix_key(public_key: str) -> str:
       public_key = jwk.export_to_pem().decode('utf-8')
     else:
       public_key = resp.content.decode('utf-8')
+  elif public_key.startswith('/') or public_key.endswith(('.pem')):
+    with open(public_key, 'r') as f:
+      public_key = f.read()
   # ENV variables sometimes don't pass newlines, spec says white space
   # doesn't matter, but pyjwt cares about it, so fix it
   public_key = public_key.replace(' PUBLIC ', '_PLACEHOLDER_')
