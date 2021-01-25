@@ -32,7 +32,8 @@ class Logger(object):
 
   def log_new(self, code: str, content: Dict) -> str:
     n = len(os.listdir(self.log_path))
-    logname = '{:06d}_{}_{}.yaml'.format(n, datetime.datetime.now().strftime('%H%M%S_%f'), code)
+    basename = '{:06d}_{}_{}'.format(n, datetime.datetime.now().strftime('%H%M%S_%f'), code)
+    logname = '{}.yaml'.format(basename)
     fullname = os.path.join(self.log_path, logname)
 
     dump = copy.deepcopy(content)
@@ -41,13 +42,18 @@ class Logger(object):
       f.write(yaml.dump(dump, indent=2))
 
     if self.kml_session:
-      with open(fullname, 'r') as f:
-        try:
-          kml_server_filename = os.path.join(self.kml_session.kml_folder, logname)
-          self.kml_session.post('/upload',
-                                data={'text': kml_server_filename},
-                                files={'file': f})
-        except IOError as e:
-          print('Error posting {} to KML server: {}'.format(kml_server_filename, e))
+      kml_server_filename = os.path.join(self.kml_session.kml_folder, logname)
+      try:
+        with open(fullname, 'r') as f:
+          resp = self.kml_session.post('/realtime_kml',
+                                       data={'path': self.kml_session.kml_folder},
+                                       files=[('files[]', f)])
+        resp.raise_for_status()
+        kml_path = os.path.join(self.log_path, 'kml')
+        os.makedirs(kml_path, exist_ok=True)
+        with open(os.path.join(kml_path, '{}.kml'.format(basename)), 'w') as f:
+          f.write(resp.content.decode('utf-8'))
+      except IOError as e:
+        print('Error posting {} to KML server: {}'.format(kml_server_filename, e))
 
     return logname

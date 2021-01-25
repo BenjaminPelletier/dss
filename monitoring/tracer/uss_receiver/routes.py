@@ -161,8 +161,13 @@ def status():
 @webapp.route('/logs')
 @webapp.route('/')
 def list_logs():
-  logs = list(reversed(sorted(os.listdir(context.resources.logger.log_path))))
-  response = flask.make_response(flask.render_template('logs.html', logs=logs))
+  logs = [log for log in reversed(sorted(os.listdir(context.resources.logger.log_path))) if log.endswith('.yaml')]
+  kmls = {}
+  for log in logs:
+    kml = os.path.join('kml', log[0:-5] + '.kml')
+    if os.path.exists(os.path.join(context.resources.logger.log_path, kml)):
+      kmls[log] = kml
+  response = flask.make_response(flask.render_template('logs.html', logs=logs, kmls=kmls))
   response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
   response.headers['Pragma'] = 'no-cache'
   return response
@@ -218,6 +223,17 @@ def logs(log):
     }
 
   return flask.render_template('log.html', log=_redact_and_augment_log(obj), title=logfile)
+
+
+@webapp.route('/kml/<kml>')
+def kmls(kml):
+  kmlfile = os.path.join(context.resources.logger.log_path, 'kml', kml)
+  if not os.path.exists(kmlfile):
+    flask.abort(404)
+  return flask.send_file(kmlfile,
+                         mimetype='application/vnd.google-earth.kml+xml',
+                         attachment_filename=kml,
+                         as_attachment=True)
 
 
 @webapp.route('/rid_poll', methods=['GET'])
