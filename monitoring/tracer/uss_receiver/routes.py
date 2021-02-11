@@ -1,4 +1,5 @@
 import datetime
+import glob
 import logging
 import os
 from typing import Dict, Tuple
@@ -223,6 +224,18 @@ def logs(log):
     }
 
   return flask.render_template('log.html', log=_redact_and_augment_log(obj), title=logfile)
+
+
+@webapp.route('/kml/now.kml')
+def kml_now():
+  all_kmls = glob.glob(os.path.join(context.resources.logger.log_path, 'kml', '*.kml'))
+  if not all_kmls:
+    flask.abort(404, 'No KMLs exist')
+  latest_kml = max(all_kmls, key=os.path.getctime)
+  return flask.send_file(latest_kml,
+                         mimetype='application/vnd.google-earth.kml+xml',
+                         attachment_filename='now.kml',
+                         as_attachment=True)
 
 
 @webapp.route('/kml/<kml>')
