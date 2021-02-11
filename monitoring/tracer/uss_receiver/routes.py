@@ -226,7 +226,7 @@ def logs(log):
   return flask.render_template('log.html', log=_redact_and_augment_log(obj), title=logfile)
 
 
-@webapp.route('/now.kml')
+@webapp.route('/kml/now.kml')
 def kml_now():
   all_kmls = glob.glob(os.path.join(context.resources.logger.log_path, 'kml', '*.kml'))
   if not all_kmls:
@@ -276,11 +276,6 @@ def request_rid_poll():
 @webapp.route('/favicon.ico')
 def favicon():
   flask.abort(404)
-
-
-@webapp.route('/kml/now.kml')
-def kml_now():
-  return flask.Response('', mimetype='application/vnd.google-earth.kml+xml')
 
 
 @webapp.route('/<path:u_path>', methods=['GET', 'PUT', 'POST', 'DELETE'])
