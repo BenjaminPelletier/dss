@@ -5,8 +5,8 @@ echo Reminder: must be run from monitoring folder
 AUTH="DummyOAuth(http://host.docker.internal:8085/token,uss1)"
 DSS="http://host.docker.internal:8082"
 PUBLIC_KEY=""/var/test-certs/auth2.pem""
-AUD="localhost"
-BASE_URL="http://localhost:8086"
+AUD="host.docker.internal"
+BASE_URL="http://host.docker.internal:8086"
 PORT=8086
 
 docker build -t local-interuss/mockuss -f mockuss/Dockerfile .
