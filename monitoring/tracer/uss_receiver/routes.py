@@ -226,7 +226,7 @@ def logs(log):
   return flask.render_template('log.html', log=_redact_and_augment_log(obj), title=logfile)
 
 
-@webapp.route('/kml/now.kml')
+@webapp.route('/now.kml')
 def kml_now():
   all_kmls = glob.glob(os.path.join(context.resources.logger.log_path, 'kml', '*.kml'))
   if not all_kmls:
