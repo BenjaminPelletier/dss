@@ -168,7 +168,9 @@ def _clear_existing_scd_subscription(resources: ResourceSet, suffix: str) -> Non
     raise SubscriptionManagementError('Could not query existing SCD Subscription -> {}'.format(logfile))
 
   if get_result.subscription is not None:
-    del_result = mutate.scd.delete_subscription(resources.dss_client, _scd_subscription_id())
+    del_result = mutate.scd.delete_subscription(
+      resources.dss_client, _scd_subscription_id(),
+      get_result.subscription.version)
     logfile = resources.logger.log_new('{}_{}'.format(SCD_SUBSCRIPTION_KEY, suffix), del_result)
     if not del_result.success:
       raise SubscriptionManagementError('Could not delete existing SCD Subscription -> {}'.format(logfile))

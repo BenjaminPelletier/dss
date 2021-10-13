@@ -69,6 +69,9 @@ container only serves via http.  This means a user will need to provide their
 own TLS termination for the external endpoint and forward traffic to the tracer
 container in order to use tracer in subscribe mode.
 
+#### Example setup
+
+
 ### Log viewer
 While tracer is running in subscribe mode, visit /logs relative to the base URL
 (e.g., https://example.com/logs) to see a list of log entries recorded by tracer

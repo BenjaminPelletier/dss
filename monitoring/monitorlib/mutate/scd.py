@@ -47,17 +47,16 @@ def put_subscription(utm_client: infrastructure.DSSTestSession,
                      subscription_id: str,
                      min_alt_m: float=0,
                      max_alt_m: float=3048,
-                     old_version: int=0) -> MutatedSubscription:
+                     old_version: Optional[str]=None) -> MutatedSubscription:
   body = {
     'extents': scd.make_vol4(
       start_time, end_time, min_alt_m, max_alt_m,
       polygon=scd.make_polygon(latlngrect=area)),
-    'old_version': old_version,
     'uss_base_url': base_url,
-    'notify_for_operations': True,
+    'notify_for_operational_intents': True,
     'notify_for_constraints': True,
   }
-  url = '/dss/v1/subscriptions/{}'.format(subscription_id)
+  url = '/dss/v1/subscriptions/{}/{}'.format(subscription_id, old_version) if old_version is not None else '/dss/v1/subscriptions/{}'.format(subscription_id)
   result = MutatedSubscription(fetch.query_and_describe(
     utm_client, 'PUT', url, json=body, scope=scd.SCOPE_SC))
   result['mutation'] = 'create' if old_version == 0 else 'update'
@@ -65,8 +64,8 @@ def put_subscription(utm_client: infrastructure.DSSTestSession,
 
 
 def delete_subscription(utm_client: infrastructure.DSSTestSession,
-                        subscription_id: str) -> MutatedSubscription:
-  url = '/dss/v1/subscriptions/{}'.format(subscription_id)
+                        subscription_id: str, old_version: str) -> MutatedSubscription:
+  url = '/dss/v1/subscriptions/{}/{}'.format(subscription_id, old_version)
   result = MutatedSubscription(fetch.query_and_describe(
     utm_client, 'DELETE', url, scope=scd.SCOPE_SC))
   result['mutation'] = 'delete'

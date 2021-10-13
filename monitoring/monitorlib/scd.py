@@ -123,5 +123,5 @@ class Subscription(dict):
     return True
 
   @property
-  def version(self) -> Optional[int]:
+  def version(self) -> Optional[str]:
     return self.get('version', None)
