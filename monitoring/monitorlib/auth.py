@@ -1,6 +1,7 @@
 import datetime
+import inspect
 import re
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple, Type
 import urllib.parse
 import uuid
 
@@ -20,6 +21,7 @@ from monitoring.monitorlib.infrastructure import AuthAdapter
 
 
 _UNIX_EPOCH = datetime.datetime.utcfromtimestamp(0)
+_AUTH_SPEC_PATTERN = r'^\s*([^\s(]+)\s*\(\s*([^)]*)\s*\)\s*$'
 
 
 class NoAuth(AuthAdapter):
@@ -262,7 +264,7 @@ class ClientIdClientSecret(AuthAdapter):
     self._client_id = client_id
     self._client_secret = client_secret
     self._send_request_as_data = send_request_as_data
-    
+
   # Overrides method in AuthAdapter
   def issue_token(self, intended_audience: str, scopes: List[str]) -> str:
     payload = {
@@ -273,7 +275,7 @@ class ClientIdClientSecret(AuthAdapter):
       'scope': ' '.join(scopes),
     }
 
-    if self._send_request_as_data: 
+    if self._send_request_as_data:
       response = requests.post(self._oauth_token_endpoint, data=payload)
     else:
       response = requests.post(self._oauth_token_endpoint, json=payload)
@@ -286,42 +288,29 @@ class FlightPassport(ClientIdClientSecret):
   """ Auth adpater for Flight Passport OAUTH server (https://www.github.com/openskies-sh/flight_passport) """
 
   def __init__(self, token_endpoint: str, client_id: str, client_secret: str, send_request_as_data:str = 'true'):
-    
+
     send_request_as_data = (send_request_as_data.lower() == 'true')
-      
+
     super(FlightPassport, self).__init__(token_endpoint, client_id, client_secret, send_request_as_data)
-  
+
     self._send_request_as_data = send_request_as_data
 
 
 class AccessTokenError(RuntimeError):
   def __init__(self, msg):
     super(AccessTokenError, self).__init__(msg)
-        
+
 def all_subclasses(cls):
     # Reference: https://stackoverflow.com/questions/3862310/how-to-find-all-the-subclasses-of-a-class-given-its-name
     return set(cls.__subclasses__()).union([s for c in cls.__subclasses__() for s in all_subclasses(c)])
 
-def make_auth_adapter(spec: str) -> AuthAdapter:
-  """Make an AuthAdapter according to a string specification.
 
-  Args:
-    spec: Specification of adapter in the form
-      ADAPTER_NAME([VALUE1[,PARAM2=VALUE2][,...]]) where ADAPTER_NAME is the
-      name of a subclass of AuthAdapter and the contents of the parentheses are
-      *args-style and **kwargs-style values for the parameters of ADAPTER_NAME's
-      __init__, but the values (all strings) do not have any quote-like
-      delimiters.
-
-  Returns:
-    An instance of the appropriate AuthAdapter subclass according to the
-    provided spec.
-  """
-  m = re.match(r'^\s*([^\s(]+)\s*\(\s*([^)]*)\s*\)\s*$', spec)
+def _parse_auth_spec(spec: str) -> Tuple[Type[AuthAdapter], List, Dict]:
+  m = re.match(_AUTH_SPEC_PATTERN, spec)
   if m is None:
     raise ValueError('Auth adapter specification did not match the pattern `AdapterName(param, param, ...)`')
 
-  adapter_name = m.group(1)  
+  adapter_name = m.group(1)
   adapter_classes = {cls.__name__: cls for cls in all_subclasses(AuthAdapter)}
   if adapter_name not in adapter_classes:
     raise ValueError('Auth adapter `%s` does not exist' % adapter_name)
@@ -338,6 +327,75 @@ def make_auth_adapter(spec: str) -> AuthAdapter:
         raise ValueError('Auth adapter specification contained a parameter with more than one `=` character')
       kwargs[kv[0].strip()] = kv[1].strip()
     else:
+      if kwargs:
+        raise ValueError('All ordinal parameters must appear before keyword parameters in an auth adapter specification')
       args.append(param_string)
 
+  return Adapter, args, kwargs
+
+
+def make_auth_adapter(spec: str) -> AuthAdapter:
+  """Make an AuthAdapter according to a string specification.
+
+  Args:
+    spec: Specification of adapter in the form
+      ADAPTER_NAME([VALUE1[,PARAM2=VALUE2][,...]]) where ADAPTER_NAME is the
+      name of a subclass of AuthAdapter and the contents of the parentheses are
+      *args-style and **kwargs-style values for the parameters of ADAPTER_NAME's
+      __init__, but the values (all strings) do not have any quote-like
+      delimiters.
+
+  Returns:
+    An instance of the appropriate AuthAdapter subclass according to the
+    provided spec.
+  """
+  Adapter, args, kwargs = _parse_auth_spec(spec)
   return Adapter(*args, **kwargs)
+
+
+def is_auth_spec(spec: str) -> bool:
+  return not (re.match(_AUTH_SPEC_PATTERN, spec) is None)
+
+
+def redact_auth_spec(spec: str) -> str:
+  """Remove sensitive information from an auth spec.
+
+  Args:
+    spec: Specification of adapter, same as for make_auth_adapter.
+
+  Returns:
+    A string containing the same information as spec, except with sensitive
+    information replaced with REDACTED.
+  """
+  Adapter, args, kwargs = _parse_auth_spec(spec)
+  sensitive_keys = {'password', 'client_secret'}
+  redaction = False
+
+  if args:
+    parameters = list(inspect.signature(Adapter.__init__).parameters)
+    for i in range(len(args)):
+      if parameters[i + 1] in sensitive_keys:
+        args[i] = 'REDACTED'
+        redaction = True
+    redacted_args = ', '.join(args)
+  else:
+    redacted_args = ''
+
+  if kwargs:
+    for key in list(kwargs.keys()):
+      if key in sensitive_keys:
+        kwargs[key] = 'REDACTED'
+        redaction = True
+    redacted_kwargs = ', '.join('{}={}'.format(k, v) for k, v in kwargs.items())
+  else:
+    redacted_kwargs = ''
+
+  if not redaction:
+    return spec
+
+  if redacted_args and redacted_kwargs:
+    parameter_string = ', '.join((redacted_args, redacted_kwargs))
+  else:
+    parameter_string = redacted_args + redacted_kwargs
+
+  return '{}({})'.format(Adapter.__name__, parameter_string)

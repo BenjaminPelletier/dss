@@ -2,13 +2,13 @@ import datetime
 import glob
 import logging
 import os
-from typing import Dict, Tuple
+from typing import Tuple
 
 import flask
 from termcolor import colored
 import yaml
 
-from monitoring.monitorlib import fetch, formatting, geo, infrastructure, versioning
+from monitoring.monitorlib import auth, fetch, formatting, geo, infrastructure, versioning
 from monitoring.monitorlib.fetch import summarize
 import monitoring.monitorlib.fetch.rid
 import monitoring.monitorlib.fetch.scd
@@ -183,6 +183,8 @@ def _redact_and_augment_log(obj):
           'value': '.'.join(v.split('.')[0:-1]) + '.REDACTED',
           'claims': infrastructure.get_token_claims(obj),
         }
+      elif k.lower() == 'auth' and isinstance(v, str) and auth.is_auth_spec(v):
+        result[k] = auth.redact_auth_spec(v)
       else:
         result[k] = _redact_and_augment_log(v)
     return result

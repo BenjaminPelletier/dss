@@ -7,7 +7,7 @@ import s2sphere
 
 from monitoring.monitorlib import geo, rid
 from monitoring.monitorlib.rid_automated_testing.injection_api import TestFlight
-from monitoring.monitorlib.typing import StringBasedDateTime
+from monitoring.monitorlib.interuss_typing import StringBasedDateTime
 from monitoring.mock_ridsp import webapp
 from monitoring.mock_ridsp.auth import requires_scope
 from .database import db

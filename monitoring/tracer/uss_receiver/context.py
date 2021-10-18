@@ -10,8 +10,7 @@ import threading
 import time
 from typing import Optional
 
-from monitoring.monitorlib import ids, versioning
-from monitoring.monitorlib import fetch
+from monitoring.monitorlib import auth, fetch, ids, versioning
 import monitoring.monitorlib.fetch.rid
 import monitoring.monitorlib.fetch.scd
 from monitoring.monitorlib import mutate
@@ -55,6 +54,7 @@ def init() -> None:
 
   config = vars(args)
   config['code_version'] = versioning.get_code_version()
+
   resources.logger.log_new('subscribe_start', config)
 
   try:

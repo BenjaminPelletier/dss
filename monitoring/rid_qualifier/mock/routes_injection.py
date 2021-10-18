@@ -4,7 +4,7 @@ import uuid
 import flask
 
 from monitoring.monitorlib.rid_automated_testing import injection_api
-from monitoring.monitorlib.typing import ImplicitDict
+from monitoring.monitorlib.interuss_typing import ImplicitDict
 from monitoring.rid_qualifier.mock import database
 from monitoring.rid_qualifier.mock.database import db
 from . import webapp

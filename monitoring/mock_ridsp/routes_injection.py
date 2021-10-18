@@ -7,7 +7,7 @@ import flask
 from monitoring.monitorlib import rid
 from monitoring.monitorlib.mutate import rid as mutate
 from monitoring.monitorlib.rid_automated_testing import injection_api
-from monitoring.monitorlib.typing import ImplicitDict
+from monitoring.monitorlib.interuss_typing import ImplicitDict
 from monitoring.mock_ridsp import webapp
 from monitoring.mock_ridsp.auth import requires_scope
 from . import config, database, resources

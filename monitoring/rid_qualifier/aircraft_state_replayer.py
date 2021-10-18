@@ -8,7 +8,7 @@ from monitoring.monitorlib import fetch
 from monitoring.rid_qualifier.utils import FullFlightRecord
 from monitoring.rid_qualifier import reports
 from monitoring.monitorlib.rid_automated_testing.injection_api import TestFlightDetails, TestFlight, CreateTestParameters, SCOPE_RID_QUALIFIER_INJECT
-from monitoring.monitorlib.typing import ImplicitDict
+from monitoring.monitorlib.interuss_typing import ImplicitDict
 import arrow
 import pathlib
 

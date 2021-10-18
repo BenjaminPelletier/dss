@@ -4,7 +4,7 @@ import shapely.geometry
 from datetime import datetime
 from monitoring.monitorlib.rid_automated_testing import injection_api
 from monitoring.monitorlib.rid import RIDAircraftState, RIDFlightDetails
-from monitoring.monitorlib.typing import ImplicitDict, StringBasedTimeDelta
+from monitoring.monitorlib.interuss_typing import ImplicitDict, StringBasedTimeDelta
 
 
 class InjectionTargetConfiguration(ImplicitDict):

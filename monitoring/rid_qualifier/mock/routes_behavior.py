@@ -2,7 +2,7 @@ from typing import Tuple
 
 import flask
 
-from monitoring.monitorlib.typing import ImplicitDict
+from monitoring.monitorlib.interuss_typing import ImplicitDict
 from monitoring.rid_qualifier.mock import behavior
 from monitoring.rid_qualifier.mock.database import db
 from . import webapp

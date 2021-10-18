@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from monitoring.monitorlib.typing import ImplicitDict
+from monitoring.monitorlib.interuss_typing import ImplicitDict
 
 
 # Mirrors of types defined in remote ID automated testing observation API

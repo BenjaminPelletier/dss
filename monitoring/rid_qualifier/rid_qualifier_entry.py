@@ -5,7 +5,7 @@ import os
 import sys
 import argparse
 from urllib.parse import urlparse
-from monitoring.monitorlib.typing import ImplicitDict
+from monitoring.monitorlib.interuss_typing import ImplicitDict
 from monitoring.rid_qualifier.utils import RIDQualifierTestConfiguration
 import monitoring.rid_qualifier.test_executor as test_executor
 

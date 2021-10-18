@@ -2,7 +2,7 @@ import json
 import redis
 import rq
 from . import resources
-from monitoring.monitorlib.typing import ImplicitDict
+from monitoring.monitorlib.interuss_typing import ImplicitDict
 from monitoring.rid_qualifier import test_executor
 from monitoring.rid_qualifier.utils import RIDQualifierTestConfiguration
 from monitoring.rid_qualifier import create_flight_record_from_kml

@@ -1,6 +1,6 @@
 from typing import Dict
 
-from monitoring.monitorlib.typing import ImplicitDict
+from monitoring.monitorlib.interuss_typing import ImplicitDict
 
 
 class FlightInfo(ImplicitDict):
