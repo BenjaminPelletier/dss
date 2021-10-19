@@ -75,7 +75,7 @@ def scd_operation_notification() -> Tuple[str, int]:
   log_name = context.resources.logger.log_new('notify_op', req)
 
   claims = req.token
-  owner = claims.get('sub', '<No owner in token>')
+  manager = claims.get('sub', '<No manager in token>')
   label = colored('Operation', 'blue')
   try:
     json = flask.request.json
@@ -87,9 +87,9 @@ def scd_operation_notification() -> Tuple[str, int]:
       time_range = ''
       if op.get('reference'):
         op_ref = op['reference']
-        owner_body = op_ref.get('owner')
-        if owner_body and owner_body != owner:
-          owner = '{} token|{} body'.format(owner, owner_body)
+        manager_body = op_ref.get('manager')
+        if manager_body and manager_body != manager:
+          manager = '{} token|{} body'.format(manager, manager_body)
         version = op_ref.get('version', version)
         ovn = op_ref.get('ovn', ovn)
         time_range = _print_time_range(
@@ -103,11 +103,11 @@ def scd_operation_notification() -> Tuple[str, int]:
         vlos = op_details.get('vlos', vlos)
       vlos_text = 'VLOS' if vlos else 'BVLOS'
       _logger.info('{} {} {} {} v{} ({}) OVN[{}] updated{} -> {}'.format(
-        label, state, vlos_text, id, version, owner, ovn, time_range, log_name))
+        label, state, vlos_text, id, version, manager, ovn, time_range, log_name))
     else:
-      _logger.info('{} {} ({}) deleted -> {}'.format(label, id, owner, log_name))
+      _logger.info('{} {} ({}) deleted -> {}'.format(label, id, manager, log_name))
   except ValueError as e:
-    _logger.error('{} ({}) unable to decode JSON: {} -> {}'.format(label, owner, e, log_name))
+    _logger.error('{} ({}) unable to decode JSON: {} -> {}'.format(label, manager, e, log_name))
 
   return RESULT
 
@@ -120,7 +120,7 @@ def scd_constraint_notification() -> Tuple[str, int]:
   log_name = context.resources.logger.log_new('notify_constraint', req)
 
   claims = infrastructure.get_token_claims({k: v for k, v in flask.request.headers})
-  owner = claims.get('sub', '<No owner in token>')
+  manager = claims.get('sub', '<No manager in token>')
   label = colored('Constraint', 'magenta')
   try:
     json = flask.request.json
@@ -132,9 +132,9 @@ def scd_constraint_notification() -> Tuple[str, int]:
       time_range = ''
       if constraint.get('reference'):
         constraint_ref = constraint['reference']
-        owner_body = constraint_ref.get('owner')
-        if owner_body and owner_body != owner:
-          owner = '{} token|{} body'.format(owner, owner_body)
+        manager_body = constraint_ref.get('manager')
+        if manager_body and manager_body != manager:
+          manager = '{} token|{} body'.format(manager, manager_body)
         version = constraint_ref.get('version', version)
         ovn = constraint_ref.get('ovn', ovn)
         time_range = _print_time_range(
@@ -145,11 +145,11 @@ def scd_constraint_notification() -> Tuple[str, int]:
         constraint_details = constraint['details']
         type = constraint_details.get('type')
       _logger.info('{} {} {} v{} ({}) OVN[{}] updated{} -> {}'.format(
-        label, type, id, version, owner, ovn, time_range, log_name))
+        label, type, id, version, manager, ovn, time_range, log_name))
     else:
-      _logger.info('{} {} ({}) deleted -> {}'.format(label, id, owner, log_name))
+      _logger.info('{} {} ({}) deleted -> {}'.format(label, id, manager, log_name))
   except ValueError as e:
-    _logger.error('{} ({}) unable to decode JSON: {} -> {}'.format(label, owner, e, log_name))
+    _logger.error('{} ({}) unable to decode JSON: {} -> {}'.format(label, manager, e, log_name))
 
   return RESULT
 
@@ -287,9 +287,9 @@ def catch_all(u_path) -> Tuple[str, int]:
   log_name = context.resources.logger.log_new('uss_badroute', req)
 
   claims = req.token
-  owner = claims.get('sub', '<No owner in token>')
+  manager = claims.get('sub', '<No manager in token>')
   label = colored('Bad route', 'red')
-  _logger.error('{} to {} ({}): {}'.format(label, u_path, owner, log_name))
+  _logger.error('{} to {} ({}): {}'.format(label, u_path, manager, log_name))
 
   return RESULT
 

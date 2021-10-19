@@ -29,8 +29,8 @@ class FetchedEntityReferences(fetch.Query):
     for entity_ref in self.json_result.get(self.entity_type, []):
       if 'id' not in entity_ref:
         return 'DSS response to search {} included entry without id'.format(self.entity_type)
-      if 'owner' not in entity_ref:
-        return 'DSS response to search {} included {} without owner'.format(self.entity_type, entity_ref['id'])
+      if 'manager' not in entity_ref:
+        return 'DSS response to search {} included {} without manager'.format(self.entity_type, entity_ref['id'])
       if 'uss_base_url' not in entity_ref:
         return 'DSS response to search {} included {} without uss_base_url'.format(self.entity_type, entity_ref['id'])
     return None
