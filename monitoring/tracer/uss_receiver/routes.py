@@ -67,11 +67,11 @@ def rid_isa_notification(id: str) -> Tuple[str, int]:
   return RESULT
 
 
-@webapp.route('/uss/v1/operations', methods=['POST'])
+@webapp.route('/uss/v1/operational_intents', methods=['POST'])
 def scd_operation_notification() -> Tuple[str, int]:
   """Implements SCD Operation notification receiver."""
   req = fetch.describe_flask_request(flask.request)
-  req['endpoint'] = 'operations'
+  req['endpoint'] = 'operational_intents'
   log_name = context.resources.logger.log_new('notify_op', req)
 
   claims = req.token
@@ -79,9 +79,9 @@ def scd_operation_notification() -> Tuple[str, int]:
   label = colored('Operation', 'blue')
   try:
     json = flask.request.json
-    id = json.get('operation_id', '<Unknown ID>')
-    if json.get('operation'):
-      op = json['operation']
+    id = json.get('operational_intent_id', '<Unknown ID>')
+    if json.get('operational_intent'):
+      op = json['operational_intent']
       version = '<Unknown version>'
       ovn = '<Unknown OVN>'
       time_range = ''
