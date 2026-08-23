@@ -1,6 +1,8 @@
 local location = {
-  horizontal: {lat: 34, lng: -118},
-  vertical: {value: 300, reference: 'W84', units: 'M'},
+  fixed_location: {
+    horizontal: {lat: 34, lng: -118},
+    vertical: {value: 300, reference: 'W84', units: 'M'},
+  },
 };
 
 local shape = {
@@ -22,7 +24,7 @@ local shape = {
         altitude_upper: {value: 20, reference: 'W84', units: 'M'},
       },
       time_start: '2026-01-01T00:00:00Z',
-      time_end: '2026-01-01T00:00:05Z',
+      time_end: '2026-01-01T00:00:15Z',
     },
   ],
 };
@@ -66,26 +68,24 @@ local make_resources(dss_instances, db_type) = {
   },
 };
 
-local make_user_types(dss_instances, subscription_strategy) = [
+local make_user_types(dss_instances, subscription_strategy, location=location) = [
   {
     name: 'FPU_%s' % dss, // Flight planner user using particular DSS instance
     flight_planner: {
       flight_generation: {
         independent_time_location_shape: {
           time: {
-            fixed_spacing: '29s',
-            uniform_random_spacing: '2s',
+            fixed_spacing: '38s',
+            uniform_random_spacing: '4s',
           },
-          location: {
-            fixed_location: location,
-          },
+          location: location,
           shape: {
             fixed_volumes: shape,
           },
         },
       },
       flight_execution: {
-        end_flight_after_start: '10s',
+        end_flight_after_start: '5s',
       },
       scd_behavior: {
         dss_pool: ['%s_dss_pool' % dss],
@@ -95,8 +95,8 @@ local make_user_types(dss_instances, subscription_strategy) = [
           ovn_coordination_group: 'cluster1',
           coordinate_requested_ovns: true,
           retries: 2,
-          accept_before_flight_start: '20s',
-          activate_before_flight_start: '10s',
+          accept_before_flight_start: '30s',
+          activate_before_flight_start: '20s',
           expect_timely_clearance: true,
         },
         op_intent_ref_cleanup_strategy: {
@@ -305,10 +305,10 @@ local make_artifacts(test_name, dss_instances, db_type) = [
   },
 ];
 
-local make_benchmark(test_name, db_type, dss_instances, users_per_step, subscription_strategy) = {
+local make_benchmark(test_name, db_type, dss_instances, users_per_step, subscription_strategy, location=location) = {
   resources: make_resources(dss_instances, db_type),
   actions: actions,
-  user_types: make_user_types(dss_instances, subscription_strategy),
+  user_types: make_user_types(dss_instances, subscription_strategy, location=location),
   loads: make_loads(dss_instances, users_per_step),
   scenarios: make_scenarios(dss_instances, db_type),
   artifacts: make_artifacts(test_name, dss_instances, db_type),

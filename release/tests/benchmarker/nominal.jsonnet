@@ -3,7 +3,7 @@ local common = import 'common.libsonnet';
 local test_name = 'Nominal';
 local db_type = 'crdb';
 local dss_instances = ['aws', 'google'];
-local users_per_step = 5;
+local users_per_step = 4;
 
 local subscription_strategy = {
   single_subscription: {
@@ -20,10 +20,23 @@ local subscription_strategy = {
   },
 };
 
+local location = {
+  uniform_random_location: {
+    horizontal: {
+      lat_min: 34 - 0.14,
+      lat_max: 34 + 0.14,
+      lng_min: -118 - 0.14,
+      lng_max: -118 + 0.14,
+    },
+    vertical: {value: 300, reference: 'W84', units: 'M'},
+  },
+};
+
 common.make_benchmark(
   test_name=test_name,
   db_type=db_type,
   dss_instances=dss_instances,
   users_per_step=users_per_step,
   subscription_strategy=subscription_strategy,
+  location=location,
 )
