@@ -107,11 +107,12 @@ local make_user_types(dss_instances, subscription_strategy, location=location) =
   } for dss in dss_instances
 ];
 
-local make_loads(dss_instances, users_per_step) = [
+local make_loads(dss_instances, users_per_step, user_types=null) = [
   {
     name: 'Flight planner ramp for %s' % dss,
     user_ramp: {
-      user_type: 'FPU_%s' % dss,
+      [if user_types == null then 'user_type']: 'FPU_%s' % dss,
+      [if user_types != null then 'user_types']: user_types(dss),
       initial_users: users_per_step,
       additional_users_per_step: users_per_step,
       random_seed: 1234,
@@ -172,10 +173,10 @@ local make_loads(dss_instances, users_per_step) = [
   } for dss in dss_instances
 ];
 
-local make_scenarios(dss_instances, db_type) = std.flattenArrays([
+local make_scenarios(dss_instances, db_type, test_name) = std.flattenArrays([
   [
     {
-      name: '%s %s' % [dss_instances[dss_index - 1], db_type],
+      name: '%s %s %s' % [test_name, dss_instances[dss_index - 1], db_type],
       load: 'Flight planner ramp for %s' % dss_instances[dss_index - 1],
       [if dss_index < std.length(dss_instances) then "teardown"]: ['Generate intermediate artifacts'],
     } for dss_index in std.range(1, std.length(dss_instances))
@@ -305,12 +306,21 @@ local make_artifacts(test_name, dss_instances, db_type) = [
   },
 ];
 
-local make_benchmark(test_name, db_type, dss_instances, users_per_step, subscription_strategy, location=location) = {
+local make_benchmark(
+  test_name,
+  db_type,
+  dss_instances,
+  users_per_step,
+  subscription_strategy=null,
+  location=location,
+  user_types=null,
+  loads=null,
+) = {
   resources: make_resources(dss_instances, db_type),
   actions: actions,
-  user_types: make_user_types(dss_instances, subscription_strategy, location=location),
-  loads: make_loads(dss_instances, users_per_step),
-  scenarios: make_scenarios(dss_instances, db_type),
+  user_types: if user_types != null then user_types else make_user_types(dss_instances, subscription_strategy, location=location),
+  loads: if loads != null then loads else make_loads(dss_instances, users_per_step),
+  scenarios: make_scenarios(dss_instances, db_type, test_name),
   artifacts: make_artifacts(test_name, dss_instances, db_type),
 };
 
