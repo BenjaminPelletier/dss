@@ -4,6 +4,7 @@ import (
 	"context"
 
 	restapi "github.com/interuss/dss/pkg/api/scdv1"
+	"github.com/interuss/dss/pkg/auth"
 	dsserr "github.com/interuss/dss/pkg/errors"
 	"github.com/interuss/dss/pkg/geo"
 	dssmodels "github.com/interuss/dss/pkg/models"
@@ -72,8 +73,8 @@ type subscriptionPayload interface {
 
 // NewCreateSubscriptionPayload performs the request validation that can be done ahead of the
 // transaction for a Subscription creation request.
-func NewCreateSubscriptionPayload(subscriptionid restapi.SubscriptionID, manager dssmodels.Manager, params *restapi.PutSubscriptionParameters, allowHTTPBaseUrls bool) (dssstore.OperationRequest, error) {
-	sub, err := newSubscription(subscriptionid, manager, "", params, allowHTTPBaseUrls)
+func NewCreateSubscriptionPayload(subscriptionid restapi.SubscriptionID, manager dssmodels.Manager, scopes []string, params *restapi.PutSubscriptionParameters, allowHTTPBaseUrls bool) (dssstore.OperationRequest, error) {
+	sub, err := newSubscription(subscriptionid, manager, scopes, "", params, allowHTTPBaseUrls)
 	if err != nil {
 		return nil, err
 	}
@@ -82,8 +83,8 @@ func NewCreateSubscriptionPayload(subscriptionid restapi.SubscriptionID, manager
 
 // NewUpdateSubscriptionPayload performs the request validation that can be done ahead of the
 // transaction for a Subscription update request.
-func NewUpdateSubscriptionPayload(subscriptionid restapi.SubscriptionID, manager dssmodels.Manager, version string, params *restapi.PutSubscriptionParameters, allowHTTPBaseUrls bool) (dssstore.OperationRequest, error) {
-	sub, err := newSubscription(subscriptionid, manager, version, params, allowHTTPBaseUrls)
+func NewUpdateSubscriptionPayload(subscriptionid restapi.SubscriptionID, manager dssmodels.Manager, scopes []string, version string, params *restapi.PutSubscriptionParameters, allowHTTPBaseUrls bool) (dssstore.OperationRequest, error) {
+	sub, err := newSubscription(subscriptionid, manager, scopes, version, params, allowHTTPBaseUrls)
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +92,7 @@ func NewUpdateSubscriptionPayload(subscriptionid restapi.SubscriptionID, manager
 }
 
 // newSubscription performs the request validation that can be done ahead of the transaction.
-func newSubscription(subscriptionid restapi.SubscriptionID, manager dssmodels.Manager, version string, params *restapi.PutSubscriptionParameters, allowHTTPBaseUrls bool) (*scdmodels.Subscription, error) {
+func newSubscription(subscriptionid restapi.SubscriptionID, manager dssmodels.Manager, scopes []string, version string, params *restapi.PutSubscriptionParameters, allowHTTPBaseUrls bool) (*scdmodels.Subscription, error) {
 	// Retrieve Subscription ID
 	id, err := dssmodels.IDFromString(string(subscriptionid))
 	if err != nil {
@@ -131,7 +132,12 @@ func newSubscription(subscriptionid restapi.SubscriptionID, manager dssmodels.Ma
 		return nil, stacktrace.NewErrorWithCode(dsserr.BadRequest, "No notification triggers requested for Subscription")
 	}
 
-	// TODO: Check scopes to verify requested information (op intents or constraints) may be requested
+	if sub.NotifyForOperationalIntents && !auth.HasScope(scopes, restapi.UtmStrategicCoordinationScope) {
+		return nil, stacktrace.NewErrorWithCode(dsserr.PermissionDenied, "Missing `%s` scope to receive notifications for operational intents", restapi.UtmStrategicCoordinationScope)
+	}
+	if sub.NotifyForConstraints && !auth.HasScope(scopes, restapi.UtmConstraintProcessingScope) {
+		return nil, stacktrace.NewErrorWithCode(dsserr.PermissionDenied, "Missing `%s` scope to receive notifications for constraints", restapi.UtmConstraintProcessingScope)
+	}
 
 	return sub, nil
 }

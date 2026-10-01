@@ -25,9 +25,13 @@ func (a *Server) CreateSubscription(ctx context.Context, req *restapi.CreateSubs
 		return restapi.CreateSubscriptionResponseSet{Response403: &restapi.ErrorResponse{
 			Message: dsserr.Handle(ctx, stacktrace.NewErrorWithCode(dsserr.PermissionDenied, "Missing owner"))}}
 	}
-	payload, err := operations.NewCreateSubscriptionPayload(req.Subscriptionid, dssmodels.Manager(*req.Auth.ClientID), req.Body, a.AllowHTTPBaseUrls)
+	payload, err := operations.NewCreateSubscriptionPayload(req.Subscriptionid, dssmodels.Manager(*req.Auth.ClientID), req.Auth.Scopes, req.Body, a.AllowHTTPBaseUrls)
 	if err != nil {
-		return restapi.CreateSubscriptionResponseSet{Response400: &restapi.ErrorResponse{Message: dsserr.Handle(ctx, err)}}
+		errResp := &restapi.ErrorResponse{Message: dsserr.Handle(ctx, err)}
+		if stacktrace.GetCode(err) == dsserr.PermissionDenied {
+			return restapi.CreateSubscriptionResponseSet{Response403: errResp}
+		}
+		return restapi.CreateSubscriptionResponseSet{Response400: errResp}
 	}
 
 	res, err := dssstore.TransactWithResult[repos.Repository, *restapi.PutSubscriptionResponse](ctx, a.Store, payload)
@@ -61,9 +65,13 @@ func (a *Server) UpdateSubscription(ctx context.Context, req *restapi.UpdateSubs
 		return restapi.UpdateSubscriptionResponseSet{Response403: &restapi.ErrorResponse{
 			Message: dsserr.Handle(ctx, stacktrace.NewErrorWithCode(dsserr.PermissionDenied, "Missing owner"))}}
 	}
-	payload, err := operations.NewUpdateSubscriptionPayload(req.Subscriptionid, dssmodels.Manager(*req.Auth.ClientID), req.Version, req.Body, a.AllowHTTPBaseUrls)
+	payload, err := operations.NewUpdateSubscriptionPayload(req.Subscriptionid, dssmodels.Manager(*req.Auth.ClientID), req.Auth.Scopes, req.Version, req.Body, a.AllowHTTPBaseUrls)
 	if err != nil {
-		return restapi.UpdateSubscriptionResponseSet{Response400: &restapi.ErrorResponse{Message: dsserr.Handle(ctx, err)}}
+		errResp := &restapi.ErrorResponse{Message: dsserr.Handle(ctx, err)}
+		if stacktrace.GetCode(err) == dsserr.PermissionDenied {
+			return restapi.UpdateSubscriptionResponseSet{Response403: errResp}
+		}
+		return restapi.UpdateSubscriptionResponseSet{Response400: errResp}
 	}
 
 	res, err := dssstore.TransactWithResult[repos.Repository, *restapi.PutSubscriptionResponse](ctx, a.Store, payload)
